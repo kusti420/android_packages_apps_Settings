@@ -604,7 +604,8 @@
     <bool name="config_show_smooth_display">false</bool>
 
     <!-- Whether to show emergency settings in top-level Settings -->
-    <bool name="config_show_emergency_settings">true</bool>
+    <!-- IchthysOS: hides the "Safety & emergency" top-level entry. -->
+    <bool name="config_show_emergency_settings">false</bool>
 
     <!-- Whether to show emergency gesture in Settings -->
     <bool name="config_show_emergency_gesture_settings">true</bool>
