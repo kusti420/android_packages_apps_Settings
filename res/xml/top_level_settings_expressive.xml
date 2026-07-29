@@ -54,7 +54,7 @@
         <!-- Custom Options: crDroidSettings homepage entry (expressive theme). -->
         <com.android.settings.widget.HomepagePreference
             android:fragment="com.crdroid.settings.crDroidSettingsLayout"
-            android:icon="@drawable/ic_settings_cogs_filled"
+            android:icon="@drawable/ic_homepage_crdroid"
             android:key="top_level_crdroid"
             android:order="-65"
             android:title="@string/crdroid_settings_title"
