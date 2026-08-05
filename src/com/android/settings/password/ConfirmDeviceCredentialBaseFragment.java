@@ -261,27 +261,6 @@ public abstract class ConfirmDeviceCredentialBaseFragment extends InstrumentedFr
     }
 
     private void setupEmergencyCallButtonIfManagedSubscription(View view) {
-        int policyType = getContext().getSystemService(
-                DevicePolicyManager.class).getManagedSubscriptionsPolicy().getPolicyType();
-
-        if (policyType == ManagedSubscriptionsPolicy.TYPE_ALL_MANAGED_SUBSCRIPTIONS) {
-            Button emergencyCallButton = view.findViewById(R.id.emergencyCallButton);
-            if (emergencyCallButton == null) {
-                Log.wtf(TAG,
-                        "Emergency call button not found in managed profile credential dialog");
-                return;
-            }
-            emergencyCallButton.setVisibility(View.VISIBLE);
-            emergencyCallButton.setOnClickListener(v -> {
-                final Intent intent = getActivity()
-                        .getSystemService(TelecomManager.class)
-                        .createLaunchEmergencyDialerIntent(null)
-                        .setFlags(Intent.FLAG_ACTIVITY_NEW_TASK
-                                | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-                getActivity().startActivity(intent);
-                getActivity().finish();
-            });
-        }
     }
 
     private void setupForgotButtonIfManagedProfile(View view) {

@@ -51,6 +51,9 @@ import android.view.MotionEvent;
 import android.view.OrientationEventListener;
 import android.view.Surface;
 import android.view.View;
+import android.view.WindowInsets;
+import android.view.WindowInsetsController;
+import android.view.WindowManager;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityManager;
 import android.view.animation.AnimationUtils;
@@ -257,6 +260,27 @@ public class FingerprintEnrollEnrolling extends BiometricsEnrollEnrolling {
             setUdfpsEnrollHelper();
             layout.initView(props.get(0), mUdfpsEnrollHelper, mAccessibilityManager);
             setContentView(layout);
+
+            // IchthysOS: Force max screen brightness during UDFPS enrollment.
+            // Optical sensors capture fingerprint images through the OLED panel —
+            // higher brightness means better illumination and image quality.
+            // BAuth rejects captures as BAD_QUALITY (39) at low brightness.
+            final WindowManager.LayoutParams lp = getWindow().getAttributes();
+            lp.screenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_FULL;
+            getWindow().setAttributes(lp);
+
+            // IchthysOS: hide 3-button navbar during UDFPS enrollment so it doesn't
+            // cover / crowd the sensor area at y=2137. Edge-to-edge drawing lets the
+            // UdfpsEnrollView use the full screen height. Swipe-from-bottom still
+            // brings the navbar back transiently.
+            getWindow().setDecorFitsSystemWindows(false);
+            final WindowInsetsController insetsCtl = getWindow().getInsetsController();
+            if (insetsCtl != null) {
+                insetsCtl.hide(WindowInsets.Type.navigationBars());
+                insetsCtl.setSystemBarsBehavior(
+                        WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+            }
+
             setDescriptionText(R.string.security_settings_udfps_enroll_start_message);
 
             if (Flags.enrollLayoutTruncateImprovement() && isPortrait) {
@@ -764,6 +788,24 @@ public class FingerprintEnrollEnrolling extends BiometricsEnrollEnrolling {
         view.playAnimation();
         if (mCanAssumeSfps) {
             mSfpsEnrollmentFeature.handleOnEnrollmentLottieComposition(view);
+        }
+        // IchthysOS: the scroll layout (enroll_layout_truncate_improvement flag)
+        // places the lottie at the top of the content area via ConstraintLayout,
+        // completely decoupled from the UdfpsEnrollView which is positioned via
+        // absolute screen coordinates at the sensor location. Translate the
+        // lottie down to overlap the sensor so the guidance animation actually
+        // shows where to place the finger.
+        if (mCanAssumeUdfps) {
+            view.post(() -> {
+                final List<FingerprintSensorPropertiesInternal> props =
+                        mFingerprintManager.getSensorPropertiesInternal();
+                if (props == null || props.isEmpty()) return;
+                int sensorCenterY = props.get(0).getLocation().sensorLocationY;
+                int[] loc = new int[2];
+                view.getLocationOnScreen(loc);
+                int viewCenterY = loc[1] + view.getHeight() / 2;
+                view.setTranslationY(sensorCenterY - viewCenterY);
+            });
         }
     }
 

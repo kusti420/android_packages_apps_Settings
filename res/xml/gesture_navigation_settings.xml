@@ -34,6 +34,14 @@
             settings:buttonPreferenceType="filled" />
     </PreferenceCategory>
 
+    <!-- IchthysOS: no assistant on this ROM, so the bottom-corner "swipe to invoke assistant"
+         toggle is hidden. Commenting it out also drops it from the Settings search index (the
+         index is built from this XML), which is why it is done here rather than in the
+         controller. The regions it used to arm are now always empty - see
+         OrientationTouchTransformer.updateAssistantRegions() and
+         RecentsAnimationDeviceState.canTriggerAssistantAction() in Launcher3, plus
+         NavBarHelper.updateAssistantAvailability() in SystemUI. Back-gesture sensitivity below
+         is untouched.
     <PreferenceCategory
         android:key="assistant_gesture_category"
         android:persistent="false"
@@ -47,6 +55,7 @@
         />
 
     </PreferenceCategory>
+    -->
 
     <PreferenceCategory
         android:key="back_sensitivity_category"

@@ -254,7 +254,8 @@
     <bool name="config_show_avatar_in_homepage">false</bool>
 
     <!-- Whether or not emergency info tile should display in device info page -->
-    <bool name="config_show_emergency_info_in_device_info">true</bool>
+    <!-- IchthysOS: no emergency affordances. -->
+    <bool name="config_show_emergency_info_in_device_info">false</bool>
 
     <!-- Whether or not branded account info tile should display in device info page -->
     <bool name="config_show_branded_account_in_device_info">true</bool>
@@ -608,7 +609,8 @@
     <bool name="config_show_emergency_settings">false</bool>
 
     <!-- Whether to show emergency gesture in Settings -->
-    <bool name="config_show_emergency_gesture_settings">true</bool>
+    <!-- IchthysOS: no emergency affordances. -->
+    <bool name="config_show_emergency_gesture_settings">false</bool>
 
     <!-- Optional package name if another 1p app wants to take over the emergency gesture settings UI -->
     <string name="emergency_gesture_settings_package"></string>

@@ -21,8 +21,22 @@
     android:title="@string/button_navigation_settings_activity_title"
     settings:keywords="@string/keywords_button_navigation_settings">
 
-    <!-- Animation uses embedded PNGs and lottie requires asset folder to be set despite
-     embedding. -->
+    <!-- IchthysOS: the only XML content of this screen was "Press and hold Home for the
+         assistant" plus its illustration, and this ROM has no assistant, so both are
+         commented out. That also removes the toggle from the Settings search index, which is
+         built from this XML.
+
+         The gear in System navigation that opens this screen is deliberately LEFT IN PLACE:
+         ButtonNavigationSettingsScreen (the Catalyst binding) contributes an unrelated
+         "button order" category that is not declared in this XML, so removing the entry point
+         could hide a working feature. Worst case the screen looks sparse.
+
+         On-screen home long-press is instead configurable in IchthysOS' own
+         Settings > crDroid > Buttons > Home key screen, which is backed by
+         TaskbarNavButtonController and no longer offers any assistant action.
+
+    <!- - Animation uses embedded PNGs and lottie requires asset folder to be set despite
+     embedding. - ->
     <com.android.settingslib.widget.IllustrationPreference
         android:key="gesture_power_menu_video"
         settings:searchable="false"
@@ -37,6 +51,7 @@
         android:summary="@string/assistant_long_press_home_gesture_summary"
         settings:controller="com.android.settings.gestures.ButtonNavigationSettingsAssistController"
     />
+    -->
 
 </PreferenceScreen>
 
