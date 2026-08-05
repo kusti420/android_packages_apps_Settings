@@ -93,6 +93,12 @@
     <com.android.settingslib.widget.ChainedPreferenceGroup
         android:key="bt_extra_options"/>
 
+    <!-- Per-device control over which events this Bluetooth device may trigger on the phone.
+         Populated at runtime by BluetoothDetailsEventControlsController. -->
+    <PreferenceCategory
+        android:key="bluetooth_event_controls"
+        android:title="@string/bluetooth_event_controls_title"/>
+
     <PreferenceCategory
         android:key="bluetooth_related_tools"
         android:title="@string/bluetooth_screen_related">

@@ -179,6 +179,12 @@
              Settings process, so crDroidSettings' lineage R.* reads (config_deviceHardwareKeys
              etc.) resolve instead of throwing NotFoundException and falling back to defaults. -->
         <uses-library android:name="org.lineageos.platform" android:required="false" />
+        <!-- IchthysOS: the line above attaches only the JAR (classes). This one attaches the
+             org.lineageos.platform-res APK, which is where the lineage resources actually live,
+             so R.array.config_displayModeMappings and friends resolve instead of throwing
+             Resources$NotFoundException for package id 0x3f. Declared by lineage-sdk's
+             lineage/res/AndroidManifest.xml. -->
+        <uses-library android:name="org.lineageos.platform.res" android:required="false" />
 
 
         <property
@@ -6283,6 +6289,18 @@
                 <action android:name="android.app.appfunctions.AppFunctionService"/>
             </intent-filter>
         </service>
+
+        <!-- IchthysOS: crDroidSettings ships these classes but has no AndroidManifest of its own
+             (its sources and resources are merged into Settings), so nothing declared them and
+             every launch died with ActivityNotFoundException. crdroid_settings_about.xml points
+             explicit intents at both activities. Not exported: they are only ever started from
+             inside Settings itself. -->
+        <activity android:name="com.crdroid.settings.fragments.about.ChangelogActivity"
+                  android:label="@string/changelog_crdroid_title"
+                  android:theme="@style/Theme.SubSettings"
+                  android:exported="false" />
+
+        <!-- IchthysOS: DonateActivity and DonateReceiver removed — not used. -->
 
         <!-- This is the longest AndroidManifest.xml ever. -->
 

@@ -432,8 +432,11 @@ public class SettingsGateway {
             SummarizationPreferenceFragment.class.getName(),
             SafetyCenterFragment.class.getName(),
             SafetyCenterQsFragment.class.getName(),
-            // Custom Options: allow the crDroidSettings homepage entry to launch.
+            // Custom Options: allow crDroid / IchthysOS fragments to launch via SubSettings.
             com.crdroid.settings.crDroidSettingsLayout.class.getName(),
+            com.crdroid.settings.fragments.security.DuressCredentialSettings.class.getName(),
+            com.crdroid.settings.fragments.health.ChargingControlSettings.class.getName(),
+            com.crdroid.settings.fragments.recents.SlimRecents.class.getName(),
     };
 
     public static final String[] SETTINGS_FOR_RESTRICTED = {

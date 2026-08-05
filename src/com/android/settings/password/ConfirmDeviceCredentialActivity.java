@@ -270,8 +270,7 @@ public class ConfirmDeviceCredentialActivity extends FragmentActivity {
 
         final int policyType = mDevicePolicyManager.getManagedSubscriptionsPolicy().getPolicyType();
 
-        if (isEffectiveUserManagedProfile
-                && (policyType == ManagedSubscriptionsPolicy.TYPE_ALL_MANAGED_SUBSCRIPTIONS)) {
+        if (false) {
             promptInfo.setShowEmergencyCallButton(true);
         }
 

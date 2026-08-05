@@ -27,12 +27,26 @@ public class AssistantVolumePreferenceController extends VolumeSliderPreferenceC
 
     private static final String KEY_ASSISTANT_VOLUME = "assistant_volume";
 
+    /** IchthysOS: no assistant on this ROM. Flip to false to restore the slider. */
+    private static final boolean ASSIST_DISABLED = true;
+
     public AssistantVolumePreferenceController(Context context) {
         super(context, KEY_ASSISTANT_VOLUME);
     }
 
     @Override
     public int getAvailabilityStatus() {
+        // IchthysOS: this ROM ships no assistant and no voice-interaction service, so the
+        // "Assistant volume" slider in Settings > Sound & vibration controls a stream nothing
+        // ever plays on. Reported UNSUPPORTED_ON_DEVICE rather than removed from
+        // sound_settings.xml because VolumeSliderPreferenceController.setupVolPreference()
+        // dereferences findPreference() without a null check whenever isAvailable() is true -
+        // deleting the XML entry alone would NPE. Doing it here also drops the row from the
+        // Settings search index and from its slice. Keep in sync with
+        // AssistantVolumePreference.isAvailable() (the Catalyst equivalent).
+        if (ASSIST_DISABLED) {
+            return UNSUPPORTED_ON_DEVICE;
+        }
         return streamAssistantPublic()
                 && !mHelper.isSingleVolume()
                 && !AssistantVolumePreference.Companion.hasFeatureWatch(mContext)
