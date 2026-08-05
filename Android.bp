@@ -219,7 +219,13 @@ android_app {
     uses_libs: ["org.apache.http.legacy"],
     // IchthysOS: org.lineageos.platform is an optional runtime shared library (its resources
     // back crDroidSettings' lineage R.* reads); declare it for the dexpreopt class-loader context.
-    optional_uses_libs: ["org.lineageos.platform"],
+    // org.lineageos.platform.res is the resource APK itself - the jar library above carries only
+    // classes, so without this the lineage R.* lookups throw NotFoundException at runtime. Both
+    // must match the <uses-library> tags in AndroidManifest.xml or the uses-library check fails.
+    optional_uses_libs: [
+        "org.lineageos.platform",
+        "org.lineageos.platform.res",
+    ],
     use_resource_processor: true,
     resource_dirs: [],
     flags_packages: [

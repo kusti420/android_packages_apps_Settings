@@ -74,6 +74,24 @@ public class ManageAssist extends DashboardFragment {
             new BaseSearchIndexProvider(
                     Flags.assistSettingsPrivacyImprovementsEnabled() ? 0 : R.xml.manage_assist) {
 
+                /**
+                 * IchthysOS: this ROM ships no assistant and no voice-interaction service, and
+                 * the user does not want one. This screen ("Assistant & voice input": default
+                 * digital assistant picker, plus its "use screen context"/"use screenshot"/
+                 * "flash screen" permissions) is therefore hidden from Settings search, which
+                 * is the only way a user would ever land on it - the activity alias is not in
+                 * any launcher category and is otherwise reachable only via an explicit
+                 * android.settings.VOICE_INPUT_SETTINGS intent from another app.
+                 *
+                 * The screen itself is intentionally left registered rather than deleted, so
+                 * that a third-party app firing VOICE_INPUT_SETTINGS gets a screen instead of
+                 * an ActivityNotFoundException crash.
+                 */
+                @Override
+                protected boolean isPageSearchEnabled(Context context) {
+                    return false;
+                }
+
                 @Override
                 public List<AbstractPreferenceController> createPreferenceControllers(
                         Context context) {

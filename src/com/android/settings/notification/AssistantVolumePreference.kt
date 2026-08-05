@@ -77,8 +77,14 @@ class AssistantVolumePreference(private val audioHelper: AudioHelper) :
 
     override fun getAvailabilityStability() = PreconditionStability.STABLE_UNTIL_APK_UPDATE
 
+    // IchthysOS: no assistant on this ROM, so the "Assistant volume" slider is always hidden.
+    // Catalyst counterpart of AssistantVolumePreferenceController.getAvailabilityStatus(); keep
+    // the two in sync.
     override fun isAvailable(context: Context) =
-        streamAssistantPublic() && !audioHelper.isSingleVolume && !hasFeatureWatch(context)
+        ASSIST_ENABLED &&
+            streamAssistantPublic() &&
+            !audioHelper.isSingleVolume &&
+            !hasFeatureWatch(context)
 
     override fun getEnabledDescription(): String = "This setting must not be restricted by a device administrator."
 
@@ -139,6 +145,9 @@ class AssistantVolumePreference(private val audioHelper: AudioHelper) :
 
     companion object {
         const val KEY = "assistant_volume"
+
+        /** IchthysOS: no assistant on this ROM. Flip to true to restore the slider. */
+        private val ASSIST_ENABLED = false
 
         fun hasFeatureWatch(context: Context) =
             context.getPackageManager().hasSystemFeature(PackageManager.FEATURE_WATCH)

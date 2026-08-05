@@ -15590,4 +15590,17 @@
     <!-- Search keywords for Human interface device access setting -->
     <string name="keywords_access_hid">hid, human, access, device</string>
     <!-- Access HID end -->
+
+    <!-- Bluetooth device details: per-device control over which events the remote may trigger -->
+    <string name="bluetooth_event_controls_title">Events from this device</string>
+    <string name="bluetooth_event_volume_title">Volume control</string>
+    <string name="bluetooth_event_volume_summary">Let this device change the media volume</string>
+    <string name="bluetooth_event_assistant_title">Assistant button</string>
+    <string name="bluetooth_event_assistant_summary">Let this device start voice recognition</string>
+    <string name="bluetooth_event_play_pause_title">Play and pause</string>
+    <string name="bluetooth_event_play_pause_summary">Let this device play, pause and stop media</string>
+    <string name="bluetooth_event_tracks_title">Next and previous track</string>
+    <string name="bluetooth_event_tracks_summary">Let this device skip between tracks</string>
+    <string name="bluetooth_event_swap_tracks_title">Swap next and previous</string>
+    <string name="bluetooth_event_swap_tracks_summary">Use when this device\'s skip buttons are the wrong way round</string>
 </resources>
