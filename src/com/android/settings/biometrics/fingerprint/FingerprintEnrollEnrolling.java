@@ -789,24 +789,11 @@ public class FingerprintEnrollEnrolling extends BiometricsEnrollEnrolling {
         if (mCanAssumeSfps) {
             mSfpsEnrollmentFeature.handleOnEnrollmentLottieComposition(view);
         }
-        // IchthysOS: the scroll layout (enroll_layout_truncate_improvement flag)
-        // places the lottie at the top of the content area via ConstraintLayout,
-        // completely decoupled from the UdfpsEnrollView which is positioned via
-        // absolute screen coordinates at the sensor location. Translate the
-        // lottie down to overlap the sensor so the guidance animation actually
-        // shows where to place the finger.
-        if (mCanAssumeUdfps) {
-            view.post(() -> {
-                final List<FingerprintSensorPropertiesInternal> props =
-                        mFingerprintManager.getSensorPropertiesInternal();
-                if (props == null || props.isEmpty()) return;
-                int sensorCenterY = props.get(0).getLocation().sensorLocationY;
-                int[] loc = new int[2];
-                view.getLocationOnScreen(loc);
-                int viewCenterY = loc[1] + view.getHeight() / 2;
-                view.setTranslationY(sensorCenterY - viewCenterY);
-            });
-        }
+        // IchthysOS: an earlier change translated the lottie down to overlap the sensor. That put
+        // the guidance illustration at the bottom edge of the screen (measured translationY=868,
+        // onScreenY=1856) and left the whole content area empty. The illustration belongs in the
+        // content area under the header; only UdfpsEnrollView - the progress ring and fingerprint
+        // icon - is meant to sit on the sensor. Leave the lottie where the layout puts it.
     }
 
     @EnrollStage

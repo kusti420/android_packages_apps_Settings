@@ -37,7 +37,10 @@ class ButtonNavigationSettingsOrderStore(val context: Context) :
             key == ReverseButtonNavigationSettingsOrderPreference.KEY
 
     override fun <T : Any> getValue(key: String, valueType: Class<T>): T? {
-        val enabled = settingsStore.getBoolean(KEY) == true
+        // IchthysOS: the ROM ships the reversed order (recents, home, back) by default, so an
+        // unset value means "reversed", not "default". Mirrors NavigationBarView's
+        // NAV_KEY_ORDER_DEFAULT; once the user picks an option the value is written explicitly.
+        val enabled = settingsStore.getBoolean(KEY) ?: true
         return when (key) {
             DefaultButtonNavigationSettingsOrderPreference.KEY -> !enabled as T?
             ReverseButtonNavigationSettingsOrderPreference.KEY -> enabled as T?
