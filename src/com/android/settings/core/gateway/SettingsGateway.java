@@ -437,6 +437,7 @@ public class SettingsGateway {
             com.crdroid.settings.fragments.security.DuressCredentialSettings.class.getName(),
             com.crdroid.settings.fragments.health.ChargingControlSettings.class.getName(),
             com.crdroid.settings.fragments.recents.SlimRecents.class.getName(),
+            com.crdroid.settings.fragments.backstage.Backstage.class.getName(),
     };
 
     public static final String[] SETTINGS_FOR_RESTRICTED = {
