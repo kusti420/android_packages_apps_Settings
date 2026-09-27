@@ -53,8 +53,12 @@ public final class ShoalBadgeDrawable extends Drawable {
     private final Paint mDots = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final RectF mRect = new RectF();
 
+    /** Mono: quiet neutral tile, no outline, no lattice notch; only the glyph carries color. */
+    private final boolean mMono;
+
     ShoalBadgeDrawable(@Nullable Drawable glyph, int color, float sizePx, float radiusPx,
-            float strokePx, float glyphPx, float dotPx, float overhangPx) {
+            float strokePx, float glyphPx, float dotPx, float overhangPx, boolean mono) {
+        mMono = mono;
         mGlyph = glyph == null ? null : glyph.mutate();
         mColor = color;
         mSize = sizePx;
@@ -64,7 +68,8 @@ public final class ShoalBadgeDrawable extends Drawable {
         mDot = dotPx;
         mOverhang = overhangPx;
         mFill.setStyle(Paint.Style.FILL);
-        mFill.setColor((color & 0x00ffffff) | 0x1f000000); // ~12 % tint
+        // Mono: a quiet tile (#12171a); colour: ~12 % tint of the category color.
+        mFill.setColor(mono ? 0xFF12171A : (color & 0x00ffffff) | 0x1f000000);
         mLine.setStyle(Paint.Style.STROKE);
         mLine.setStrokeWidth(strokePx);
         mLine.setColor(color);
@@ -93,7 +98,7 @@ public final class ShoalBadgeDrawable extends Drawable {
         final float half = mStroke / 2f;
         mRect.set(left + half, top + half, left + mSize - half, top + mSize - half);
         canvas.drawRoundRect(mRect, mRadius, mRadius, mFill);
-        canvas.drawRoundRect(mRect, mRadius, mRadius, mLine);
+        if (!mMono) canvas.drawRoundRect(mRect, mRadius, mRadius, mLine);
 
         if (mGlyph != null) {
             final int gl = Math.round(left + (mSize - mGlyphSize) / 2f);
@@ -102,6 +107,7 @@ public final class ShoalBadgeDrawable extends Drawable {
             mGlyph.draw(canvas);
         }
 
+        if (mMono) return;
         // Lattice notch: two dots on the top row, one nested half a step in below.
         final float r = mDot / 2f;
         final float gap = mDot * 0.25f;

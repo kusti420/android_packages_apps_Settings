@@ -50,6 +50,8 @@ public final class ShoalStyle {
     private ShoalStyle() {}
 
     public static final String KEY_BADGES = "ichthys_settings_icon_badges";
+    /** theme.iconStyle: "mono" (default) or "colour". */
+    public static final String KEY_ICON_STYLE = "ichthys_settings_icon_style";
     public static final String KEY_FONT_DISPLAY = "ichthys_theme_font_display";
     public static final String KEY_FONT_TEXT = "ichthys_theme_font_text";
     public static final String KEY_FONT_MONO = "ichthys_theme_font_mono";
@@ -92,6 +94,12 @@ public final class ShoalStyle {
             0xFF2DE2E6, 0xFFD27BFF, 0xFFC6FF3D, 0xFFFFB000, 0xFFFF5FA2, 0xFF7AA2FF,
             0xFFF5E663, 0xFF9AA6FF, 0xFFFF9ECF, 0xFF8AE1FF};
 
+    /** Mono badges (the default): off-white glyph on a quiet tile, accent only for accent items. */
+    public static boolean monoBadges(Context context) {
+        return !"colour".equals(Settings.Secure.getString(context.getContentResolver(),
+                KEY_ICON_STYLE));
+    }
+
     public static boolean badgesEnabled(Context context) {
         return Settings.Secure.getInt(context.getContentResolver(), KEY_BADGES, 1) != 0;
     }
@@ -132,8 +140,13 @@ public final class ShoalStyle {
         if (glyph instanceof ShoalBadgeDrawable) {
             return glyph;
         }
+        if (monoBadges(context)) {
+            final int glyphColor = color == accent(context) ? color : 0xFFF2F4F1;
+            return new ShoalBadgeDrawable(glyph, glyphColor, dp(context, 46), dp(context, 15),
+                    0f, dp(context, 22), 0f, dp(context, 3), /* mono= */ true);
+        }
         return new ShoalBadgeDrawable(glyph, color, dp(context, 46), dp(context, 15),
-                dp(context, 1.5f), dp(context, 22), dp(context, 4), dp(context, 3));
+                dp(context, 1.5f), dp(context, 22), dp(context, 4), dp(context, 3), false);
     }
 
     /**
