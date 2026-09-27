@@ -26,6 +26,16 @@
         android:layout="@layout/settingslib_untitled_preference_category">
     </PreferenceCategory>
 
+    <!-- IchthysOS Shoal: protections summary card; opens the IchthysOS page. -->
+    <PreferenceCategory
+        android:order="-135"
+        android:key="top_level_ichthys_protected_category"
+        android:layout="@layout/settingslib_untitled_preference_category">
+        <com.android.settings.ichthys.ShoalProtectedPreference
+            android:key="top_level_ichthys_protected"
+            android:fragment="com.crdroid.settings.fragments.IchthysOS" />
+    </PreferenceCategory>
+
     <PreferenceCategory
         android:order="-130"
         android:key="top_level_connectivity_category"

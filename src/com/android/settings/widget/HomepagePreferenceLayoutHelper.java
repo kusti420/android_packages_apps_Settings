@@ -17,6 +17,7 @@
 package com.android.settings.widget;
 
 import android.view.View;
+import android.widget.ImageView;
 import android.widget.TextView;
 
 import androidx.preference.Preference;
@@ -24,6 +25,7 @@ import androidx.preference.PreferenceViewHolder;
 
 import com.android.settings.R;
 import com.android.settings.flags.Flags;
+import com.android.settings.ichthys.ShoalStyle;
 import com.android.settingslib.widget.SettingsThemeHelper;
 
 /** Helper for homepage preference to manage layout. */
@@ -39,6 +41,7 @@ public class HomepagePreferenceLayoutHelper {
     private int mIconPaddingStart = -1;
     private int mTextPaddingStart = -1;
     private int mAlertValue = -1;
+    private final Preference mPreference;
 
     /** The interface for managing preference layouts on homepage */
     public interface HomepagePreferenceLayout {
@@ -47,6 +50,7 @@ public class HomepagePreferenceLayoutHelper {
     }
 
     public HomepagePreferenceLayoutHelper(Preference preference) {
+        mPreference = preference;
         preference.setLayoutResource(
                 SettingsThemeHelper.isExpressiveTheme(preference.getContext())
                         ? R.layout.homepage_preference_expressive
@@ -115,5 +119,10 @@ public class HomepagePreferenceLayoutHelper {
         setIconPaddingStart(mIconPaddingStart);
         setTextPaddingStart(mTextPaddingStart);
         setAlert(mAlertValue);
+        // IchthysOS Shoal: color-coded outlined icon badges and the theme's body font.
+        ShoalStyle.bindIcon((ImageView) holder.findViewById(android.R.id.icon),
+                mPreference.getIcon(), mPreference.getKey());
+        ShoalStyle.bindRowText((TextView) holder.findViewById(android.R.id.title),
+                (TextView) holder.findViewById(android.R.id.summary));
     }
 }

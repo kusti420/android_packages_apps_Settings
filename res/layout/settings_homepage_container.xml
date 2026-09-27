@@ -69,12 +69,25 @@
             android:id="@+id/app_bar_container"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal"
+            android:orientation="vertical"
             android:paddingTop="@dimen/search_bar_container_top_padding"
             android:paddingBottom="@dimen/settingslib_expressive_space_extrasmall4"
             android:paddingStart="?android:attr/listPreferredItemPaddingStart"
             android:paddingEnd="?android:attr/listPreferredItemPaddingEnd"
             android:background="?android:attr/colorBackground">
+
+            <!-- IchthysOS Shoal: large display-font title above the search pill. -->
+            <TextView
+                android:id="@+id/ichthys_homepage_title"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingStart="8dp"
+                android:paddingTop="56dp"
+                android:paddingBottom="18dp"
+                android:text="@string/settings_label"
+                android:textSize="40sp"
+                android:textColor="?android:attr/textColorPrimary"
+                android:accessibilityHeading="true" />
 
             <include layout="@layout/search_bar"/>
 

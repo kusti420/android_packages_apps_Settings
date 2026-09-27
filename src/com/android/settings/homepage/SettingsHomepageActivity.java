@@ -262,6 +262,7 @@ public class SettingsHomepageActivity extends FragmentActivity implements
         mLoadedListeners = new ArraySet<>();
 
         initSearchBarView();
+        com.android.settings.ichthys.ShoalStyle.styleHomepageHeader(this);
 
         getLifecycle().addObserver(new HideNonSystemOverlayMixin(this));
         mCategoryMixin = new CategoryMixin(this);
