@@ -275,8 +275,17 @@ public final class ShoalStyle {
                 com.android.settings.R.string.ichthys_protect_sensors),
                 globalOn(context, "ichthys_sensor_fingerprint_protection")));
         out.add(new Protection(context.getString(
-                com.android.settings.R.string.ichthys_protect_adblock), true));
+                com.android.settings.R.string.ichthys_protect_adblock), adBlockActive()));
         return out;
+    }
+
+    /**
+     * The system-wide blocklist ships as /system/etc/hosts (HaGeZi, tens of thousands of entries).
+     * A stock hosts file is a few lines, so size tells whether blocking is in place. Nothing can
+     * turn it off at runtime; this catches a build or overlay that shipped without it.
+     */
+    private static boolean adBlockActive() {
+        return new java.io.File("/system/etc/hosts").length() > 64 * 1024;
     }
 
     private static boolean globalOn(Context context, String key) {
