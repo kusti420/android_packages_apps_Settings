@@ -115,6 +115,9 @@ public final class WifiDisplaySettings extends SettingsPreferenceFragment implem
 
     private TextView mEmptyView;
 
+    /* IchthysOS cast kill-switch */
+    private boolean mIchthysCastEnabled;
+
     /* certification */
     private boolean mWifiDisplayCertificationOn;
     private WifiP2pManager mWifiP2pManager;
@@ -186,9 +189,16 @@ public final class WifiDisplaySettings extends SettingsPreferenceFragment implem
                 Settings.Global.WIFI_DISPLAY_CERTIFICATION_ON), false, mSettingsObserver);
         getContentResolver().registerContentObserver(Settings.Global.getUriFor(
                 Settings.Global.WIFI_DISPLAY_WPS_CONFIG), false, mSettingsObserver);
+        getContentResolver().registerContentObserver(Settings.Global.getUriFor(
+                Settings.Global.CAST_ENABLED), false, mSettingsObserver);
 
-        mRouter.addCallback(MediaRouter.ROUTE_TYPE_REMOTE_DISPLAY, mRouterCallback,
-                MediaRouter.CALLBACK_FLAG_PERFORM_ACTIVE_SCAN);
+        // IchthysOS: only register for active scanning when cast is enabled.
+        mIchthysCastEnabled = Settings.Global.getInt(getContentResolver(),
+                Settings.Global.CAST_ENABLED, 0) != 0;
+        if (mIchthysCastEnabled) {
+            mRouter.addCallback(MediaRouter.ROUTE_TYPE_REMOTE_DISPLAY, mRouterCallback,
+                    MediaRouter.CALLBACK_FLAG_PERFORM_ACTIVE_SCAN);
+        }
 
         update(CHANGE_ALL);
     }
@@ -273,6 +283,8 @@ public final class WifiDisplaySettings extends SettingsPreferenceFragment implem
                     Settings.Global.WIFI_DISPLAY_CERTIFICATION_ON, 0) != 0;
             mWpsConfig = Settings.Global.getInt(getContentResolver(),
                     Settings.Global.WIFI_DISPLAY_WPS_CONFIG, WpsInfo.INVALID);
+            mIchthysCastEnabled = Settings.Global.getInt(getContentResolver(),
+                    Settings.Global.CAST_ENABLED, 0) != 0;
 
             // The wifi display enabled setting may have changed.
             invalidateOptions = true;
@@ -298,30 +310,51 @@ public final class WifiDisplaySettings extends SettingsPreferenceFragment implem
         }
         preferenceScreen.removeAll();
 
-        // Add all known remote display routes.
-        final int routeCount = mRouter.getRouteCount();
-        for (int i = 0; i < routeCount; i++) {
-            MediaRouter.RouteInfo route = mRouter.getRouteAt(i);
-            if (route.matchesTypes(MediaRouter.ROUTE_TYPE_REMOTE_DISPLAY)) {
-                preferenceScreen.addPreference(createRoutePreference(route));
-            }
-        }
+        // IchthysOS: add a master toggle for Cast at the top of the screen.
+        SwitchPreferenceCompat castToggle = new SwitchPreferenceCompat(getPrefContext());
+        castToggle.setKey("ichthys_cast_enabled");
+        castToggle.setTitle(R.string.wifi_display_settings_title);
+        castToggle.setSummary(mIchthysCastEnabled
+                ? R.string.wifi_display_settings_on_summary
+                : R.string.wifi_display_settings_off_summary);
+        castToggle.setChecked(mIchthysCastEnabled);
+        castToggle.setOrder(0);
+        castToggle.setOnPreferenceChangeListener((preference, newValue) -> {
+            boolean enabled = (Boolean) newValue;
+            Settings.Global.putInt(getContentResolver(),
+                    Settings.Global.CAST_ENABLED, enabled ? 1 : 0);
+            return true;
+        });
+        preferenceScreen.addPreference(castToggle);
 
-        // Additional features for wifi display routes.
-        if (mWifiDisplayStatus != null
-                && mWifiDisplayStatus.getFeatureState() == WifiDisplayStatus.FEATURE_STATE_ON) {
-            // Add all unpaired wifi displays.
-            for (WifiDisplay display : mWifiDisplayStatus.getDisplays()) {
-                if (!display.isRemembered() && display.isAvailable()
-                        && !display.equals(mWifiDisplayStatus.getActiveDisplay())) {
-                    preferenceScreen.addPreference(new UnpairedWifiDisplayPreference(
-                            getPrefContext(), display));
+        // Only show route discovery results when cast is enabled.
+        if (mIchthysCastEnabled) {
+            // Add all known remote display routes.
+            final int routeCount = mRouter.getRouteCount();
+            for (int i = 0; i < routeCount; i++) {
+                MediaRouter.RouteInfo route = mRouter.getRouteAt(i);
+                if (route.matchesTypes(MediaRouter.ROUTE_TYPE_REMOTE_DISPLAY)) {
+                    preferenceScreen.addPreference(createRoutePreference(route));
                 }
             }
 
-            // Add the certification menu if enabled in developer options.
-            if (mWifiDisplayCertificationOn) {
-                buildCertificationMenu(preferenceScreen);
+            // Additional features for wifi display routes.
+            if (mWifiDisplayStatus != null
+                    && mWifiDisplayStatus.getFeatureState()
+                            == WifiDisplayStatus.FEATURE_STATE_ON) {
+                // Add all unpaired wifi displays.
+                for (WifiDisplay display : mWifiDisplayStatus.getDisplays()) {
+                    if (!display.isRemembered() && display.isAvailable()
+                            && !display.equals(mWifiDisplayStatus.getActiveDisplay())) {
+                        preferenceScreen.addPreference(new UnpairedWifiDisplayPreference(
+                                getPrefContext(), display));
+                    }
+                }
+
+                // Add the certification menu if enabled in developer options.
+                if (mWifiDisplayCertificationOn) {
+                    buildCertificationMenu(preferenceScreen);
+                }
             }
         }
 
