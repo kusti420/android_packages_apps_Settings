@@ -2252,6 +2252,10 @@
 
     <!-- Wifi Display settings. The title of the screen. [CHAR LIMIT=40] -->
     <string name="wifi_display_settings_title">Google Cast</string>
+    <!-- IchthysOS: Cast toggle summary when cast is off. [CHAR LIMIT=NONE] -->
+    <string name="wifi_display_settings_off_summary">Cast discovery and connections are disabled</string>
+    <!-- IchthysOS: Cast toggle summary when cast is on. [CHAR LIMIT=NONE] -->
+    <string name="wifi_display_settings_on_summary">Apps can discover and connect to Cast devices</string>
     <!-- Wifi Display settings. The keywords of the setting. [CHAR LIMIT=NONE] -->
     <string name="keywords_wifi_display_settings">mirror</string>
     <!-- Wifi Display settings. The title of a menu item to enable wireless display [CHAR LIMIT=40] -->

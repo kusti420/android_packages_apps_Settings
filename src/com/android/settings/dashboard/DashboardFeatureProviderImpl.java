@@ -565,6 +565,14 @@ public class DashboardFeatureProviderImpl implements DashboardFeatureProvider {
         }
 
         ColorScheme scheme = getColorScheme(tile);
+        // IchthysOS: crDroid settings_icon_style / _random_colors / _corner_style. Returns null
+        // when the user is on the stock look, in which case we keep the AdaptiveIcon path below.
+        final Drawable styled = SettingsIconStyler.style(mContext, drawable,
+                scheme.foregroundColor, scheme.backgroundColor,
+                SettingsIconStyler.stableKeyFor(mContext, tile));
+        if (styled != null) {
+            return styled;
+        }
         return getRoundedIcon(drawable, scheme.foregroundColor, scheme.backgroundColor);
     }
 
