@@ -124,5 +124,11 @@ public class HomepagePreferenceLayoutHelper {
                 mPreference.getIcon(), mPreference.getKey());
         ShoalStyle.bindRowText((TextView) holder.findViewById(android.R.id.title),
                 (TextView) holder.findViewById(android.R.id.summary));
+        if (com.android.settingslib.widget.ShoalSurfaces.isHairline(holder.itemView.getContext())) {
+            // Shoal: 68dp rows inside the grouped hairline cards.
+            holder.itemView.setMinimumHeight(Math.round(android.util.TypedValue.applyDimension(
+                    android.util.TypedValue.COMPLEX_UNIT_DIP, 68,
+                    holder.itemView.getResources().getDisplayMetrics())));
+        }
     }
 }

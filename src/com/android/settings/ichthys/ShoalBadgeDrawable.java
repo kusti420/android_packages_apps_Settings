@@ -17,22 +17,29 @@
 package com.android.settings.ichthys;
 
 import android.graphics.Canvas;
+import android.graphics.Color;
 import android.graphics.ColorFilter;
 import android.graphics.Paint;
+import android.graphics.Path;
 import android.graphics.PixelFormat;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffColorFilter;
 import android.graphics.Rect;
 import android.graphics.RectF;
+import android.graphics.drawable.AdaptiveIconDrawable;
 import android.graphics.drawable.Drawable;
+import android.graphics.drawable.LayerDrawable;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
 /**
- * IchthysOS "Shoal" Settings icon badge: an outlined squircle with a faint fill of the category
- * color, the original glyph tinted in that color, and the three-dot lattice notch at its top-right
- * corner (the status bar's zig-zag motif).
+ * IchthysOS "Shoal" Settings icon badge: an outlined squircle with a faint fill, the category glyph
+ * centred and tinted, and the three-dot lattice notch at its top-right corner (the status bar's
+ * zig-zag motif).
+ *
+ * <p>Colour style: fill / outline / glyph / dots all derive from the category colour. Mono style:
+ * neutral fill (#f2f4f1 at ~8 %), #3a4246 outline, #f2f4f1 glyph, #8b938f dots.
  *
  * <p>Geometry (in px, from dp by the caller): the squircle is {@code size} square with corner
  * {@code radius}; the drawable's intrinsic size adds {@code notchOverhang} on the top and end so
@@ -40,7 +47,11 @@ import androidx.annotation.Nullable;
  */
 public final class ShoalBadgeDrawable extends Drawable {
 
+    /** Adaptive-icon foregrounds are 108 units with the art inside the middle ~48; scale up. */
+    private static final float ADAPTIVE_SCALE = 108f / 48f;
+
     private final Drawable mGlyph;
+    private final boolean mAdaptiveGlyph;
     private final int mColor;
     private final float mSize;
     private final float mRadius;
@@ -48,18 +59,25 @@ public final class ShoalBadgeDrawable extends Drawable {
     private final float mGlyphSize;
     private final float mDot;
     private final float mOverhang;
+    private final int mFillAlpha;
     private final Paint mFill = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint mLine = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint mDots = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final RectF mRect = new RectF();
+    private final Path mClip = new Path();
 
-    /** Mono: quiet neutral tile, no outline, no lattice notch; only the glyph carries color. */
-    private final boolean mMono;
-
-    ShoalBadgeDrawable(@Nullable Drawable glyph, int color, float sizePx, float radiusPx,
-            float strokePx, float glyphPx, float dotPx, float overhangPx, boolean mono) {
-        mMono = mono;
-        mGlyph = glyph == null ? null : glyph.mutate();
+    /**
+     * @param glyph the preference icon; its glyph is extracted (see {@link #extractGlyph})
+     * @param color identity colour of the badge (category colour, or the glyph colour in mono)
+     */
+    ShoalBadgeDrawable(@Nullable Drawable glyph, int color, int fillColor, int lineColor,
+            int glyphColor, int dotColor, float sizePx, float radiusPx, float strokePx,
+            float glyphPx, float dotPx, float overhangPx) {
+        final Drawable g = extractGlyph(glyph);
+        mAdaptiveGlyph = glyph instanceof AdaptiveIconDrawable
+                || (glyph instanceof ShoalBadgeDrawable
+                        && ((ShoalBadgeDrawable) glyph).mAdaptiveGlyph);
+        mGlyph = g == null ? null : g.mutate();
         mColor = color;
         mSize = sizePx;
         mRadius = radiusPx;
@@ -68,16 +86,49 @@ public final class ShoalBadgeDrawable extends Drawable {
         mDot = dotPx;
         mOverhang = overhangPx;
         mFill.setStyle(Paint.Style.FILL);
-        // Mono: a quiet tile (#12171a); colour: ~12 % tint of the category color.
-        mFill.setColor(mono ? 0xFF12171A : (color & 0x00ffffff) | 0x1f000000);
+        mFill.setColor(fillColor);
+        mFillAlpha = Color.alpha(fillColor);
         mLine.setStyle(Paint.Style.STROKE);
         mLine.setStrokeWidth(strokePx);
-        mLine.setColor(color);
+        mLine.setColor(lineColor);
         mDots.setStyle(Paint.Style.FILL);
-        mDots.setColor(color);
+        mDots.setColor(dotColor);
         if (mGlyph != null) {
-            mGlyph.setColorFilter(new PorterDuffColorFilter(color, PorterDuff.Mode.SRC_IN));
+            // A colour filter wins over any tint the glyph (or a TintDrawable) carries.
+            mGlyph.setTintList(null);
+            mGlyph.setColorFilter(new PorterDuffColorFilter(glyphColor, PorterDuff.Mode.SRC_IN));
         }
+    }
+
+    /**
+     * The bare glyph of a Settings icon. Homepage icons are layer-lists of a filled background
+     * shape (AdaptiveIconShapeDrawable) plus the inset glyph; tinting the whole list paints one
+     * solid square. Take the top-most layer instead (recursively), the foreground of an adaptive
+     * icon, and the glyph of an existing badge.
+     */
+    @Nullable
+    static Drawable extractGlyph(@Nullable Drawable d) {
+        for (int depth = 0; d != null && depth < 4; depth++) {
+            if (d instanceof ShoalBadgeDrawable) {
+                return ((ShoalBadgeDrawable) d).mGlyph;
+            } else if (d instanceof AdaptiveIconDrawable) {
+                final Drawable fg = ((AdaptiveIconDrawable) d).getForeground();
+                return fg != null ? fg : d;
+            } else if (d instanceof LayerDrawable) {
+                final LayerDrawable ld = (LayerDrawable) d;
+                final int n = ld.getNumberOfLayers();
+                if (n == 0) return null;
+                if (n == 1) {
+                    d = ld.getDrawable(0);
+                    continue;
+                }
+                // Top-most layer is the glyph; the lower ones are background plates.
+                return ld.getDrawable(n - 1);
+            } else {
+                return d;
+            }
+        }
+        return d;
     }
 
     /** The wrapped glyph, so a badge is never wrapped twice. */
@@ -98,16 +149,22 @@ public final class ShoalBadgeDrawable extends Drawable {
         final float half = mStroke / 2f;
         mRect.set(left + half, top + half, left + mSize - half, top + mSize - half);
         canvas.drawRoundRect(mRect, mRadius, mRadius, mFill);
-        if (!mMono) canvas.drawRoundRect(mRect, mRadius, mRadius, mLine);
+        if (mStroke > 0f) canvas.drawRoundRect(mRect, mRadius, mRadius, mLine);
 
         if (mGlyph != null) {
-            final int gl = Math.round(left + (mSize - mGlyphSize) / 2f);
-            final int gt = Math.round(top + (mSize - mGlyphSize) / 2f);
-            mGlyph.setBounds(gl, gt, gl + Math.round(mGlyphSize), gt + Math.round(mGlyphSize));
+            final float gs = mAdaptiveGlyph ? mGlyphSize * ADAPTIVE_SCALE : mGlyphSize;
+            final int gl = Math.round(left + (mSize - gs) / 2f);
+            final int gt = Math.round(top + (mSize - gs) / 2f);
+            mGlyph.setBounds(gl, gt, gl + Math.round(gs), gt + Math.round(gs));
+            final int save = canvas.save();
+            mClip.reset();
+            mClip.addRoundRect(mRect, mRadius, mRadius, Path.Direction.CW);
+            canvas.clipPath(mClip);
             mGlyph.draw(canvas);
+            canvas.restoreToCount(save);
         }
 
-        if (mMono) return;
+        if (mDot <= 0f) return;
         // Lattice notch: two dots on the top row, one nested half a step in below.
         final float r = mDot / 2f;
         final float gap = mDot * 0.25f;
@@ -130,7 +187,7 @@ public final class ShoalBadgeDrawable extends Drawable {
 
     @Override
     public void setAlpha(int alpha) {
-        mFill.setAlpha(Math.round(0x1f * alpha / 255f));
+        mFill.setAlpha(Math.round(mFillAlpha * alpha / 255f));
         mLine.setAlpha(alpha);
         mDots.setAlpha(alpha);
         if (mGlyph != null) mGlyph.setAlpha(alpha);
@@ -139,7 +196,7 @@ public final class ShoalBadgeDrawable extends Drawable {
 
     @Override
     public void setColorFilter(@Nullable ColorFilter colorFilter) {
-        // The badge carries its own category color; ignore tints applied by the host view.
+        // The badge carries its own colours; ignore tints applied by the host view.
     }
 
     @Override

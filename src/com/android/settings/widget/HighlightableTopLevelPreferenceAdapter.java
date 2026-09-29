@@ -34,6 +34,7 @@ import androidx.window.embedding.ActivityEmbeddingController;
 
 import com.android.settings.core.RoundCornerPreferenceAdapter;
 import com.android.settings.homepage.SettingsHomepageActivity;
+import com.android.settings.ichthys.ShoalStyle;
 import com.android.settingslib.widget.SettingsThemeHelper;
 import com.android.settingslib.widget.theme.R;
 
@@ -218,8 +219,7 @@ public class HighlightableTopLevelPreferenceAdapter extends RoundCornerPreferenc
 
     private void addHighlightBackground(PreferenceViewHolder holder, int position) {
         final View v = holder.itemView;
-        @DrawableRes int bgRes = getRoundCornerDrawableRes(position, true /*isSelected*/);
-        v.setBackgroundResource(bgRes);
+        setRowBackground(v, position, true /* isSelected */);
         Context context = v.getContext();
         if (SettingsThemeHelper.isExpressiveTheme(context)) {
             // homepage preference title should change text appearance when it's selected
@@ -229,14 +229,14 @@ public class HighlightableTopLevelPreferenceAdapter extends RoundCornerPreferenc
                 title.setTextAppearance(context,
                         R.style.TextAppearance_SettingsLib_TitleMedium_Emphasized);
                 title.setTextColor(currentColor);
+                ShoalStyle.bindRowText(title, null);
             }
         }
     }
 
     private void removeHighlightBackground(PreferenceViewHolder holder, int position) {
         final View v = holder.itemView;
-        @DrawableRes int bgRes = getRoundCornerDrawableRes(position, false /*isSelected*/);
-        v.setBackgroundResource(bgRes);
+        setRowBackground(v, position, false /* isSelected */);
         Context context = v.getContext();
         if (SettingsThemeHelper.isExpressiveTheme(context)) {
             // recover homepage preference title when it's unselected
@@ -245,6 +245,7 @@ public class HighlightableTopLevelPreferenceAdapter extends RoundCornerPreferenc
                 ColorStateList currentColor = title.getTextColors();
                 title.setTextAppearance(context, R.style.TextAppearance_SettingsLib_TitleMedium);
                 title.setTextColor(currentColor);
+                ShoalStyle.bindRowText(title, null);
             }
         }
     }

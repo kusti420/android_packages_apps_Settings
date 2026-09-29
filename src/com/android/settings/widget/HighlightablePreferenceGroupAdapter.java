@@ -405,7 +405,7 @@ public class HighlightablePreferenceGroupAdapter extends SettingsPreferenceGroup
                     v.setBackgroundResource(backgroundTo);
                     requestRemoveHighlightDelayed(holder, position);
                 } else {
-                    v.setBackgroundResource(backgroundFrom);
+                    setNormalRowBackground(v, position, backgroundFrom);
                     mHighlightVisible = false;
                     holder.setIsRecyclable(true);
                 }
@@ -432,7 +432,7 @@ public class HighlightablePreferenceGroupAdapter extends SettingsPreferenceGroup
         Drawable backgroundToDrawable = ContextCompat.getDrawable(context, backgroundTo);
 
         if (!animate || backgroundFromDrawable == null || backgroundToDrawable == null) {
-            v.setBackgroundResource(backgroundTo);
+            setNormalRowBackground(v, position, backgroundTo);
             v.setTag(R.id.preference_highlighted, false);
             holder.setIsRecyclable(true);
             Log.d(TAG, "RemoveHighlight: No animation requested - setting normal background");
@@ -471,7 +471,7 @@ public class HighlightablePreferenceGroupAdapter extends SettingsPreferenceGroup
                     @Override
                     public void onAnimationEnd(@NonNull Animator animation) {
                         super.onAnimationEnd(animation);
-                        v.setBackgroundResource(backgroundTo);
+                        setNormalRowBackground(v, position, backgroundTo);
 
                         v.setTag(R.id.preference_highlighted, false);
                         holder.setIsRecyclable(true);
@@ -484,7 +484,7 @@ public class HighlightablePreferenceGroupAdapter extends SettingsPreferenceGroup
                     @Override
                     public void onAnimationCancel(@NonNull Animator animation) {
                         super.onAnimationCancel(animation);
-                        v.setBackgroundResource(backgroundTo);
+                        setNormalRowBackground(v, position, backgroundTo);
                         v.setTag(R.id.preference_highlighted, false);
                         holder.setIsRecyclable(true);
 

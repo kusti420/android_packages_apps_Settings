@@ -28,7 +28,9 @@ import androidx.preference.PreferenceGroup;
 import androidx.preference.PreferenceGroupAdapter;
 import androidx.preference.PreferenceViewHolder;
 
+import com.android.settings.ichthys.ShoalProtectedPreference;
 import com.android.settingslib.widget.SettingsThemeHelper;
+import com.android.settingslib.widget.ShoalSurfaces;
 import com.android.settingslib.widget.theme.R;
 
 import java.util.ArrayList;
@@ -168,9 +170,40 @@ public class RoundCornerPreferenceAdapter extends PreferenceGroupAdapter {
 
     /** handle roundCorner background */
     private void updateBackground(PreferenceViewHolder holder, int position) {
-        @DrawableRes int backgroundRes = getRoundCornerDrawableRes(position, false /* isSelected*/);
+        setRowBackground(holder.itemView, position, false /* isSelected */);
+    }
 
-        View v = holder.itemView;
+    /**
+     * Sets the row's round-corner background; with IchthysOS Shoal hairline surfaces the row
+     * becomes its slice of one outlined group card instead (see {@link ShoalSurfaces}).
+     */
+    protected void setRowBackground(View v, int position, boolean isSelected) {
+        if (getItem(position) instanceof ShoalProtectedPreference) {
+            // The Protected card draws its own outlined surface.
+            v.setBackground(null);
+            return;
+        }
+        @DrawableRes int backgroundRes = getRoundCornerDrawableRes(position, isSelected);
         v.setBackgroundResource(backgroundRes);
+        if (backgroundRes != 0 && ShoalSurfaces.isHairline(v.getContext())) {
+            ShoalSurfaces.applyRow(v, getShoalPositionState(position), isSelected);
+        }
+    }
+
+    /** The row's place in its group as android.R.attr.state_single/first/middle/last, or 0. */
+    protected int getShoalPositionState(int position) {
+        if (position < 0 || position >= mRoundCornerMappingList.size()) {
+            return 0;
+        }
+        final int cornerType = mRoundCornerMappingList.get(position);
+        if ((cornerType & ROUND_CORNER_CENTER) == 0) {
+            return 0;
+        }
+        final boolean top = (cornerType & ROUND_CORNER_TOP) != 0;
+        final boolean bottom = (cornerType & ROUND_CORNER_BOTTOM) != 0;
+        if (top && bottom) return android.R.attr.state_single;
+        if (top) return android.R.attr.state_first;
+        if (bottom) return android.R.attr.state_last;
+        return android.R.attr.state_middle;
     }
 }

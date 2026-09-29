@@ -30,6 +30,8 @@ import android.widget.TextView;
 
 import androidx.annotation.Nullable;
 
+import com.android.settingslib.widget.ShoalSurfaces;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -135,18 +137,33 @@ public final class ShoalStyle {
                 context.getResources().getDisplayMetrics());
     }
 
-    /** Wraps {@code glyph} in a badge of {@code color}; returns an existing badge unchanged. */
-    public static Drawable badge(Context context, @Nullable Drawable glyph, int color) {
-        if (glyph instanceof ShoalBadgeDrawable) {
-            return glyph;
+    /** Wraps {@code icon}'s glyph in a badge of {@code color}; returns an existing badge unchanged. */
+    public static Drawable badge(Context context, @Nullable Drawable icon, int color) {
+        if (icon instanceof ShoalBadgeDrawable) {
+            return icon;
         }
+        final float size = dp(context, 46);
+        final float radius = dp(context, 15);
+        final float stroke = dp(context, 1.5f);
+        final float glyph = dp(context, 22);
+        final float dot = dp(context, 4);
+        final float overhang = dp(context, 3);
         if (monoBadges(context)) {
-            final int glyphColor = color == accent(context) ? color : 0xFFF2F4F1;
-            return new ShoalBadgeDrawable(glyph, glyphColor, dp(context, 46), dp(context, 15),
-                    0f, dp(context, 22), 0f, dp(context, 3), /* mono= */ true);
+            // Mono: neutral squircle (#f2f4f1 at 0x14 on ink), #3a4246 hairline, off-white glyph,
+            // muted #8b938f lattice. IchthysOS's own items keep the accent on glyph and outline.
+            // In day mode the same roles flip to ink on paper.
+            final boolean night = ShoalSurfaces.isNight(context);
+            final boolean isAccent = color == accent(context);
+            final int neutral = night ? 0xFFF2F4F1 : 0xFF12171A;
+            final int ink = isAccent ? color : neutral;
+            final int line = isAccent ? color : (night ? 0xFF3A4246 : 0xFFC4CAC7);
+            final int dots = isAccent ? color : (night ? 0xFF8B938F : 0xFF6B7370);
+            return new ShoalBadgeDrawable(icon, ink, (neutral & 0x00ffffff) | 0x14000000,
+                    line, ink, dots, size, radius, stroke, glyph, dot, overhang);
         }
-        return new ShoalBadgeDrawable(glyph, color, dp(context, 46), dp(context, 15),
-                dp(context, 1.5f), dp(context, 22), dp(context, 4), dp(context, 3), false);
+        // Colour: ~12 % category tint fill, 1.5dp category outline, category glyph and lattice.
+        return new ShoalBadgeDrawable(icon, color, (color & 0x00ffffff) | 0x1f000000,
+                color, color, color, size, radius, stroke, glyph, dot, overhang);
     }
 
     /**
@@ -213,10 +230,32 @@ public final class ShoalStyle {
         return family(context, KEY_FONT_MONO, DEFAULT_MONO, weight);
     }
 
-    /** Body font on a list row's title (medium) and summary (regular). */
+    /**
+     * Body font on a list row's title (medium) and summary (regular). With hairline surfaces the
+     * Shoal sizes apply too: title 15sp, summary 12.5sp in the muted ink tone.
+     */
     public static void bindRowText(@Nullable TextView title, @Nullable TextView summary) {
-        if (title != null) title.setTypeface(text(title.getContext(), 500));
-        if (summary != null) summary.setTypeface(text(summary.getContext(), 400));
+        if (title != null) {
+            title.setTypeface(text(title.getContext(), 500));
+            if (ShoalSurfaces.isHairline(title.getContext())) {
+                title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f);
+            }
+        }
+        if (summary != null) {
+            final Context c = summary.getContext();
+            summary.setTypeface(text(c, 400));
+            if (ShoalSurfaces.isHairline(c)) {
+                summary.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f);
+                if (ShoalSurfaces.isNight(c)) {
+                    final int muted = ShoalSurfaces.mutedTextColor(c);
+                    summary.setTextColor(new android.content.res.ColorStateList(
+                            new int[][] {
+                                    new int[] {-android.R.attr.state_enabled},
+                                    new int[] {}},
+                            new int[] {(muted & 0x00ffffff) | 0x61000000, muted}));
+                }
+            }
+        }
     }
 
     /**
@@ -225,8 +264,8 @@ public final class ShoalStyle {
     public static void styleHomepageHeader(android.app.Activity activity) {
         final TextView title = activity.findViewById(com.android.settings.R.id.ichthys_homepage_title);
         if (title != null) {
-            title.setTypeface(display(activity, 700));
-            title.setLetterSpacing(-0.01f);
+            title.setTypeface(display(activity, 600));
+            title.setLetterSpacing(-0.0125f);
         }
         final android.view.View bar = activity.findViewById(
                 com.android.settings.R.id.search_action_bar);
@@ -234,16 +273,15 @@ public final class ShoalStyle {
                 instanceof com.google.android.material.card.MaterialCardView) {
             final com.google.android.material.card.MaterialCardView card =
                     (com.google.android.material.card.MaterialCardView) bar.getParent();
-            final boolean hairline = !"tonal".equals(Settings.Secure.getString(
-                    activity.getContentResolver(), "ichthys_theme_surface"));
+            final boolean hairline = ShoalSurfaces.isHairline(activity);
             card.setRadius(dp(activity, 24));
             card.setCardElevation(0);
-            card.setStrokeWidth(Math.round(dp(activity, 1)));
-            card.setStrokeColor(activity.getColor(
-                    hairline ? android.R.color.system_neutral2_700
-                            : android.R.color.transparent));
+            card.setStrokeWidth(hairline ? Math.max(1, Math.round(dp(activity, 1))) : 0);
+            card.setStrokeColor(hairline ? ShoalSurfaces.hairlineColor(activity)
+                    : android.graphics.Color.TRANSPARENT);
             if (hairline) {
-                card.setCardBackgroundColor(android.graphics.Color.TRANSPARENT);
+                // Search pill: the ink card (#0c1013) with the #20282d hairline.
+                card.setCardBackgroundColor(ShoalSurfaces.cardColor(activity));
             }
             bar.setMinimumHeight(Math.round(dp(activity, 48)));
             bar.setBackground(null);

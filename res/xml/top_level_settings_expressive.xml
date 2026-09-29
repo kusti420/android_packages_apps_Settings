@@ -24,6 +24,15 @@
         android:order="-140"
         android:key="top_level_account_category"/>
 
+    <!-- IchthysOS Shoal: protections summary card; opens the IchthysOS page. -->
+    <com.android.settingslib.widget.UntitledPreferenceCategory
+        android:order="-135"
+        android:key="top_level_ichthys_protected_category">
+        <com.android.settings.ichthys.ShoalProtectedPreference
+            android:key="top_level_ichthys_protected"
+            android:fragment="com.crdroid.settings.fragments.IchthysOS" />
+    </com.android.settingslib.widget.UntitledPreferenceCategory>
+
     <com.android.settingslib.widget.UntitledPreferenceCategory
         android:order="-130"
         android:key="top_level_connectivity_category">
@@ -46,26 +55,13 @@
             android:summary="@string/connected_devices_dashboard_default_summary"
             settings:highlightableMenuKey="@string/menu_key_connected_devices"
             settings:controller="com.android.settings.connecteddevice.TopLevelConnectedDevicesPreferenceController"/>
-    </com.android.settingslib.widget.UntitledPreferenceCategory>
 
-    <com.android.settingslib.widget.UntitledPreferenceCategory
-        android:order="-120"
-        android:key="top_level_personalize_category">
-        <!-- Custom Options: crDroidSettings homepage entry (expressive theme). -->
-        <com.android.settings.widget.HomepagePreference
-            android:fragment="com.crdroid.settings.crDroidSettingsLayout"
-            android:icon="@drawable/ic_homepage_crdroid"
-            android:key="top_level_crdroid"
-            android:order="-65"
-            android:title="@string/crdroid_settings_title"
-            android:summary="@string/crdroid_settings_summary"
-            settings:controller="com.crdroid.settings.TopLevelSettingsPreferenceController"/>
-
+        <!-- IchthysOS Shoal: cards of ~4 rows. Apps and notifications join connectivity. -->
         <com.android.settings.widget.HomepagePreference
             android:fragment="com.android.settings.applications.AppDashboardFragment"
             android:icon="@drawable/ic_homepage_apps"
             android:key="top_level_apps"
-            android:order="-60"
+            android:order="-8"
             android:title="@string/apps_dashboard_title"
             android:summary="@string/app_and_notification_dashboard_summary"
             settings:highlightableMenuKey="@string/menu_key_apps"/>
@@ -74,11 +70,15 @@
             android:fragment="com.android.settings.notification.ConfigureNotificationSettings"
             android:icon="@drawable/ic_homepage_notification"
             android:key="top_level_notifications"
-            android:order="-50"
+            android:order="-6"
             android:title="@string/configure_notification_settings"
             android:summary="@string/notification_dashboard_summary"
             settings:highlightableMenuKey="@string/menu_key_notifications"/>
+    </com.android.settingslib.widget.UntitledPreferenceCategory>
 
+    <com.android.settingslib.widget.UntitledPreferenceCategory
+        android:order="-120"
+        android:key="top_level_personalize_category">
         <com.android.settings.widget.HomepagePreference
             android:fragment="com.android.settings.notification.SoundSettings"
             android:icon="@drawable/ic_homepage_sound"
@@ -170,6 +170,17 @@
             android:summary="@string/summary_placeholder"
             settings:highlightableMenuKey="@string/menu_key_about_device"
             settings:controller="com.android.settings.deviceinfo.aboutphone.TopLevelAboutDevicePreferenceController"/>
+
+        <!-- IchthysOS Shoal: the IchthysOS entry sits with battery and system. -->
+        <!-- Custom Options: crDroidSettings homepage entry (expressive theme). -->
+        <com.android.settings.widget.HomepagePreference
+            android:fragment="com.crdroid.settings.crDroidSettingsLayout"
+            android:icon="@drawable/ic_homepage_crdroid"
+            android:key="top_level_crdroid"
+            android:order="-25"
+            android:title="@string/crdroid_settings_title"
+            android:summary="@string/crdroid_settings_summary"
+            settings:controller="com.crdroid.settings.TopLevelSettingsPreferenceController"/>
     </com.android.settingslib.widget.UntitledPreferenceCategory>
 
     <com.android.settingslib.widget.UntitledPreferenceCategory
