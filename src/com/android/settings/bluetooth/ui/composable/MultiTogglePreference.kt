@@ -123,6 +123,8 @@ private fun getButtonColors(isActive: Boolean) =
     } else {
         ButtonDefaults.buttonColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant,
-            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+            // IchthysOS: content on surfaceVariant must be onSurfaceVariant; onPrimaryContainer
+            // was black-on-black under the old all-black palette.
+            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }

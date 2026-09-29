@@ -18,8 +18,10 @@
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:androidprv="http://schemas.android.com/apk/prv/res/android"
     android:shape="rectangle">
+    <!-- IchthysOS: the ring sits on the SurfaceDim topology pane, not a PrimaryContainer;
+         OnPrimaryContainer was invisible (black-on-black) under the old all-black palette. -->
     <stroke
-        android:color="@color/materialColorOnPrimaryContainer"
+        android:color="@color/materialColorPrimary"
         android:width="@dimen/display_block_highlight_width" />
     <corners android:radius="@dimen/display_block_corner_radius" />
 </shape>

@@ -132,9 +132,12 @@ public class StorageSelectionPreferenceController extends BasePreferenceControll
 
         @Override
         public View getDropDownView(int position, View view, ViewGroup parent) {
-            if (view == null) {
-                view = getDefaultDropDownView(position, view, parent);
-            }
+            // IchthysOS: go through SettingsSpinnerAdapter so the expressive dropdown gets its
+            // per-row treatment (check icon only on the selected row, OnPrimaryContainer text on
+            // the selected pill and OnSurface text elsewhere). Inflating the default view directly
+            // left every row with the selected-row colours - black text on the black popup under
+            // the old all-black palette - and a check mark on every row.
+            view = super.getDropDownView(position, view, parent);
             asTextView(view).setText(getItem(position).getDescription());
             return view;
         }

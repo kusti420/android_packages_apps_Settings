@@ -502,7 +502,9 @@
 
     <style name="LockPatternStyleExpressive">
         <item name="*android:regularColor">@color/settingslib_materialColorPrimary</item>
-        <item name="*android:successColor">@color/settingslib_materialColorOnPrimaryContainer</item>
+        <!-- IchthysOS: the pattern is drawn straight on the surface, never on a PrimaryContainer;
+             OnPrimaryContainer made the success path black-on-black under the old all-black palette. -->
+        <item name="*android:successColor">@color/settingslib_materialColorPrimary</item>
         <item name="*android:errorColor">@color/settingslib_materialColorError</item>
         <item name="*android:dotColor">@color/settingslib_materialColorOnSurface</item>
         <item name="*android:dotActivatedColor">@color/settingslib_materialColorOnSurfaceInverse</item>
@@ -541,7 +543,8 @@
 
     <style name="WorkChallengeEmergencyButtonStyle">
         <item name="android:background">@drawable/work_challenge_emergency_button_background</item>
-        <item name="android:textColor">@android:color/system_accent3_900</item>
+        <!-- IchthysOS: matches the system_tertiary_fixed pill (see background drawable). -->
+        <item name="android:textColor">@android:color/system_on_tertiary_fixed</item>
         <item name="android:outlineProvider">none</item>
         <item name="android:paddingTop">15dp</item>
         <item name="android:paddingBottom">15dp</item>
