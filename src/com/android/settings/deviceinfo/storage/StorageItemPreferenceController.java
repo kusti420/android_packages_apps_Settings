@@ -81,6 +81,7 @@ public class StorageItemPreferenceController extends AbstractPreferenceControlle
 
     @VisibleForTesting
     static final String PUBLIC_STORAGE_KEY = "pref_public_storage";
+    private static final String ICHTHYS_FILE_MANAGER = "ru.zdevs.zarchiver";
     @VisibleForTesting
     static final String IMAGES_KEY = "pref_images";
     @VisibleForTesting
@@ -529,7 +530,13 @@ public class StorageItemPreferenceController extends AbstractPreferenceControlle
     }
 
     private void launchPublicStorageIntent() {
-        final Intent intent = mVolume.buildBrowseIntent();
+        // IchthysOS: "Files" opens the file manager, ZArchiver; DocumentsUI's volume root only
+        // when ZArchiver isn't installed for this user (its launcher icon is hidden).
+        Intent intent = mContext.createContextAsUser(new UserHandle(mUserId), 0)
+                .getPackageManager().getLaunchIntentForPackage(ICHTHYS_FILE_MANAGER);
+        if (intent == null) {
+            intent = mVolume.buildBrowseIntent();
+        }
         if (intent == null) {
             return;
         }
