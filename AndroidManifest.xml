@@ -6287,6 +6287,22 @@
             </intent-filter>
         </activity>
 
+        <!-- IchthysOS gallery clean-up (Settings > Storage, Guard): re-applies .nomedia markers
+             when images change, and re-arms after boot. -->
+        <service
+            android:name=".ichthys.gallery.GalleryCleanupJobService"
+            android:permission="android.permission.BIND_JOB_SERVICE"
+            android:exported="false"
+            android:directBootAware="false" />
+        <receiver
+            android:name=".ichthys.gallery.GalleryCleanupBootReceiver"
+            android:exported="true"
+            android:directBootAware="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
         <!-- IchthysOS Guard: per-app network firewall and activity monitor (formerly the
              org.ichthys.guard priv-app). Guard keeps its state in credential-protected storage,
              so none of its components is direct-boot aware. Only Settings' own explicit intents

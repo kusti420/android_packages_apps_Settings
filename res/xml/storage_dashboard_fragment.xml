@@ -38,6 +38,14 @@
         android:icon="@drawable/ic_storage"
         android:order="3"
         settings:controller="com.android.settings.deviceinfo.storage.AutomaticStorageManagementSwitchPreferenceController"/>
+    <!-- IchthysOS: gallery clean-up (W8b decision 31); same state as the Guard entry. -->
+    <Preference
+        android:fragment="com.android.settings.ichthys.gallery.GalleryCleanupSettings"
+        android:key="ichthys_gallery_cleanup"
+        android:title="@string/ichthys_gallery_cleanup_title"
+        android:summary="@string/ichthys_gallery_cleanup_summary"
+        android:order="3"
+        settings:searchable="false" />
     <com.android.settingslib.widget.CardPreference
         android:key="free_up_space"
         android:order="4"
