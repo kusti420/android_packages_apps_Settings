@@ -25,4 +25,8 @@
     <string name="ichthys_protect_clipboard">Clipboard lockdown</string>
     <string name="ichthys_protect_sensors">Sensor shield</string>
     <string name="ichthys_protect_adblock">Ad blocking</string>
+
+    <!-- Screen lock: shuffle the digits of the PIN pad each time the bouncer appears -->
+    <string name="lockscreen_scramble_pin_layout_title">Scramble PIN layout</string>
+    <string name="lockscreen_scramble_pin_layout_summary">Shuffle the number keys every time the PIN pad appears</string>
 </resources>
