@@ -97,3 +97,11 @@
 
 # Keep the device state AppFunction schema
 -keep class com.google.android.appfunctions.schema.common.v1.devicestate.** { *; }
+
+# IchthysOS Guard: kotlinx.serialization models (policies.json, rules.json, stats.json and the
+# tracker database). Keep the generated serializers and the companions that expose them.
+-keepclassmembers @kotlinx.serialization.Serializable class com.android.settings.ichthys.guard.** {
+    *** Companion;
+    kotlinx.serialization.KSerializer serializer(...);
+}
+-keep,includedescriptorclasses class com.android.settings.ichthys.guard.**$$serializer { *; }

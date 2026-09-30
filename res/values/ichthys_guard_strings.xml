@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Copyright (C) 2026 IchthysOS
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+  -->
+<resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
+    <!-- IchthysOS Guard: per-app network firewall and activity monitor (Settings homepage row,
+         GuardActivity, notifications and Quick Settings tiles). -->
+    <string name="ichthys_guard_title">Guard</string>
+    <string name="ichthys_guard_summary">Per-app firewall, trackers and live network activity</string>
+    <string name="ichthys_guard_navigate_up">Navigate up</string>
+
+    <!-- Notification channels -->
+    <string name="ichthys_guard_channel_alerts">Guard alerts</string>
+    <string name="ichthys_guard_channel_alerts_summary">New apps: what they embed, with one-tap network and tracker controls</string>
+    <string name="ichthys_guard_channel_reports">Guard reports</string>
+    <string name="ichthys_guard_channel_reports_summary">Weekly summary of trackers seen and blocked</string>
+
+    <!-- Quick Settings tiles -->
+    <string name="ichthys_guard_tile_lockdown">Lockdown</string>
+    <string name="ichthys_guard_tile_lockdown_on">Apps offline</string>
+    <string name="ichthys_guard_tile_off">Off</string>
+    <string name="ichthys_guard_tile_pause">Pause Guard</string>
+    <string name="ichthys_guard_tile_paused">Guard paused</string>
+    <string name="ichthys_guard_tile_paused_until">until <xliff:g id="time">%1$s</xliff:g></string>
+    <string name="ichthys_guard_tile_pause_duration">5 min</string>
+</resources>

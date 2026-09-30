@@ -36,6 +36,7 @@ import com.android.settings.core.instrumentation.ElapsedTimeUtils;
 import com.android.settings.development.DeveloperOptionsActivityLifecycle;
 import com.android.settings.flags.Flags;
 import com.android.settings.fuelgauge.BatterySettingsStorage;
+import com.android.settings.ichthys.guard.notify.GuardNotifications;
 import com.android.settings.homepage.SettingsHomepageActivity;
 import com.android.settings.localepicker.LocaleNotificationDataManager;
 import com.android.settings.metrics.SettingsMetricsLogger;
@@ -121,6 +122,10 @@ public class SettingsApplication extends Application {
         registerActivityLifecycleCallbacks(new DeveloperOptionsActivityLifecycle());
 
         MSDLPlayerWrapper.INSTANCE.createPlayer(this);
+
+        // IchthysOS Guard: notification channels, weekly report alarm and the new-app watcher.
+        // Cheap and idempotent; skipped until the user is unlocked (BootReceiver finishes it).
+        GuardNotifications.init(this);
     }
 
     /** Returns the factories of preference screen metadata. */

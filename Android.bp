@@ -129,6 +129,11 @@ android_library {
         // Custom Options: crDroidSettings support (lineage-sdk preference widgets).
         "LineagePreferenceLib",
 
+        // IchthysOS Guard (src/com/android/settings/ichthys/guard): JSON persistence of
+        // policies, rules and stats. The IIchthysGuard AIDL comes from framework.jar
+        // (platform_apis).
+        "kotlinx_serialization_json",
+
         // app function dependencies
         "androidx.appsearch_appsearch",
         "androidx.appsearch_appsearch-builtin-types",
@@ -142,7 +147,11 @@ android_library {
         "SettingsLibMetadata-processor",
         "androidx.room_room-compiler-plugin",
     ],
-    kotlin_plugins: ["kotlin-parcelize-compiler-plugin"],
+    kotlin_plugins: [
+        "kotlin-parcelize-compiler-plugin",
+        // IchthysOS Guard: @Serializable models.
+        "kotlin-serialize-compiler-plugin",
+    ],
 
     errorprone: {
         extra_check_modules: ["//external/nullaway:nullaway_plugin"],
@@ -213,6 +222,7 @@ android_app {
     privileged: true,
     required: [
         "privapp_whitelist_com.android.settings",
+        "privapp-permissions-com.android.settings-ichthys",
         "settings-platform-compat-config",
     ],
     static_libs: ["Settings-core"],
@@ -231,6 +241,17 @@ android_app {
     flags_packages: [
         "android.app.flags-aconfig",
     ],
+}
+
+// IchthysOS: privileged permissions Settings needs on top of frameworks/base's
+// com.android.settings.xml (merged per package by SystemConfig), for Guard. Must install with the
+// .xml filename or SystemConfig skips it and enforce mode crash-loops system_server.
+prebuilt_etc {
+    name: "privapp-permissions-com.android.settings-ichthys",
+    src: "privapp-permissions-com.android.settings-ichthys.xml",
+    filename: "privapp-permissions-com.android.settings-ichthys.xml",
+    sub_dir: "permissions",
+    system_ext_specific: true,
 }
 
 android_library_import {

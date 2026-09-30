@@ -1,0 +1,188 @@
+[
+ {
+  "name": "Google AdMob",
+  "category": "Advertisement",
+  "domains": [
+   "doubleclick.net",
+   "googleadservices.com",
+   "googlesyndication.com",
+   "admob.com"
+  ],
+  "codeSignatures": [
+   "com.google.android.gms.ads.",
+   "com.google.ads."
+  ]
+ },
+ {
+  "name": "Google Firebase Analytics",
+  "category": "Analytics",
+  "domains": [
+   "app-measurement.com",
+   "firebase-settings.crashlytics.com"
+  ],
+  "codeSignatures": [
+   "com.google.firebase.analytics.",
+   "com.google.android.gms.measurement."
+  ]
+ },
+ {
+  "name": "Facebook Analytics",
+  "category": "Analytics",
+  "domains": [
+   "graph.facebook.com",
+   "an.facebook.com"
+  ],
+  "codeSignatures": [
+   "com.facebook.appevents.",
+   "com.facebook.ads."
+  ]
+ },
+ {
+  "name": "AppsFlyer",
+  "category": "Analytics",
+  "domains": [
+   "appsflyer.com",
+   "appsflyersdk.com"
+  ],
+  "codeSignatures": [
+   "com.appsflyer."
+  ]
+ },
+ {
+  "name": "Adjust",
+  "category": "Analytics",
+  "domains": [
+   "adjust.com",
+   "adjust.io"
+  ],
+  "codeSignatures": [
+   "com.adjust.sdk."
+  ]
+ },
+ {
+  "name": "Unity Ads",
+  "category": "Advertisement",
+  "domains": [
+   "unityads.unity3d.com",
+   "ads.unity3d.com"
+  ],
+  "codeSignatures": [
+   "com.unity3d.ads."
+  ]
+ },
+ {
+  "name": "Branch",
+  "category": "Analytics",
+  "domains": [
+   "branch.io",
+   "app.link"
+  ],
+  "codeSignatures": [
+   "io.branch."
+  ]
+ },
+ {
+  "name": "Google CrashLytics",
+  "category": "Crash reporting",
+  "domains": [
+   "crashlytics.com"
+  ],
+  "codeSignatures": [
+   "com.crashlytics.",
+   "com.google.firebase.crashlytics."
+  ]
+ },
+ {
+  "name": "Mixpanel",
+  "category": "Analytics",
+  "domains": [
+   "mixpanel.com"
+  ],
+  "codeSignatures": [
+   "com.mixpanel."
+  ]
+ },
+ {
+  "name": "Amplitude",
+  "category": "Analytics",
+  "domains": [
+   "amplitude.com"
+  ],
+  "codeSignatures": [
+   "com.amplitude."
+  ]
+ },
+ {
+  "name": "Braze",
+  "category": "Profiling",
+  "domains": [
+   "braze.com",
+   "appboy.com"
+  ],
+  "codeSignatures": [
+   "com.braze.",
+   "com.appboy."
+  ]
+ },
+ {
+  "name": "Unity3d Ads",
+  "category": "Advertisement",
+  "domains": [
+   "uca.cloud.unity3d.com"
+  ],
+  "codeSignatures": [
+   "com.unity3d.services."
+  ]
+ },
+ {
+  "name": "MoPub",
+  "category": "Advertisement",
+  "domains": [
+   "mopub.com"
+  ],
+  "codeSignatures": [
+   "com.mopub."
+  ]
+ },
+ {
+  "name": "AdColony",
+  "category": "Advertisement",
+  "domains": [
+   "adcolony.com"
+  ],
+  "codeSignatures": [
+   "com.adcolony."
+  ]
+ },
+ {
+  "name": "Bugsnag",
+  "category": "Crash reporting",
+  "domains": [
+   "bugsnag.com"
+  ],
+  "codeSignatures": [
+   "com.bugsnag."
+  ]
+ },
+ {
+  "name": "Segment",
+  "category": "Analytics",
+  "domains": [
+   "segment.io",
+   "segment.com"
+  ],
+  "codeSignatures": [
+   "com.segment.analytics."
+  ]
+ },
+ {
+  "name": "Sentry",
+  "category": "Crash reporting",
+  "domains": [
+   "ingest.sentry.io"
+  ],
+  "codeSignatures": [
+   "io.sentry."
+  ]
+ }
+]

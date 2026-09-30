@@ -33,6 +33,21 @@
             android:fragment="com.crdroid.settings.fragments.IchthysOS" />
     </com.android.settingslib.widget.UntitledPreferenceCategory>
 
+    <!-- IchthysOS: Guard, the per-app network firewall and activity monitor (GuardActivity). -->
+    <com.android.settingslib.widget.UntitledPreferenceCategory
+        android:order="-134"
+        android:key="top_level_ichthys_guard_category">
+        <com.android.settings.widget.HomepagePreference
+            android:icon="@drawable/ic_ichthys_guard"
+            android:key="top_level_ichthys_guard"
+            android:title="@string/ichthys_guard_title"
+            android:summary="@string/ichthys_guard_summary">
+            <intent
+                android:targetPackage="com.android.settings"
+                android:targetClass="com.android.settings.ichthys.guard.ui.GuardActivity" />
+        </com.android.settings.widget.HomepagePreference>
+    </com.android.settingslib.widget.UntitledPreferenceCategory>
+
     <com.android.settingslib.widget.UntitledPreferenceCategory
         android:order="-130"
         android:key="top_level_connectivity_category">

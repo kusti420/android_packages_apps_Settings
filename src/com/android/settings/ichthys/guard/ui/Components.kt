@@ -1,0 +1,286 @@
+/*
+ * Copyright (C) 2026 IchthysOS
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.android.settings.ichthys.guard.ui
+
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import com.android.settings.ichthys.guard.model.LabeledEvent
+import com.android.settings.ichthys.guard.ui.theme.Guard
+import java.text.DateFormat
+import java.util.Date
+
+/**
+ * One group: the Shoal card on the ink ground. Outlined by a hairline with theme.surface =
+ * hairline, a filled card without a stroke when it is tonal.
+ */
+@Composable
+fun GuardCard(
+    modifier: Modifier = Modifier,
+    title: String? = null,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val t = Guard.tokens
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(t.radius),
+        color = t.card,
+        border = if (t.hairlineSurfaces) BorderStroke(t.hairlineWidth, t.hairline) else null,
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            if (title != null) {
+                SectionLabel(title)
+            }
+            content()
+        }
+    }
+}
+
+@Composable
+fun SectionLabel(text: String, modifier: Modifier = Modifier) {
+    Text(
+        text.uppercase(),
+        style = MaterialTheme.typography.labelSmall.copy(fontFamily = Guard.tokens.mono),
+        color = Guard.tokens.muted,
+        modifier = modifier.padding(bottom = 8.dp),
+    )
+}
+
+@Composable
+fun Stat(
+    value: String,
+    label: String,
+    modifier: Modifier = Modifier,
+    color: Color = Color.Unspecified,
+) {
+    Column(modifier) {
+        Text(
+            value,
+            style = MaterialTheme.typography.headlineSmall.copy(fontFamily = Guard.tokens.mono),
+            color = color,
+        )
+        Text(label, style = MaterialTheme.typography.bodySmall, color = Guard.tokens.muted)
+    }
+}
+
+/**
+ * Small pill label (tracker name, BLOCKED, DNS …). Tags repeat down lists, so they never take the
+ * accent: emphasized ones are full-strength text on the outline, the rest muted on the hairline.
+ */
+@Composable
+fun Tag(text: String, emphasized: Boolean = false, danger: Boolean = false) {
+    val t = Guard.tokens
+    val fg =
+        when {
+            danger -> t.danger
+            emphasized -> t.text
+            else -> t.muted
+        }
+    val line =
+        when {
+            danger -> t.danger.copy(alpha = 0.6f)
+            emphasized -> t.outline
+            else -> t.hairline
+        }
+    Box(
+        Modifier.padding(end = 4.dp)
+            .border(t.hairlineWidth, line, RoundedCornerShape(t.radiusSmall))
+            .padding(horizontal = 6.dp, vertical = 1.dp)
+    ) {
+        Text(
+            text,
+            style = MaterialTheme.typography.labelSmall.copy(fontFamily = t.mono),
+            color = fg,
+            maxLines = 1,
+        )
+    }
+}
+
+@Composable
+fun ToggleRow(
+    label: String,
+    checked: Boolean,
+    supporting: String? = null,
+    enabled: Boolean = true,
+    onChange: (Boolean) -> Unit,
+) {
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(label, style = MaterialTheme.typography.bodyLarge)
+            if (supporting != null)
+                Text(
+                    supporting,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Guard.tokens.muted,
+                )
+        }
+        Switch(checked = checked, onCheckedChange = onChange, enabled = enabled)
+    }
+}
+
+/**
+ * Material 3 segmented control over an enum-ish list. The selected segment is the group's one
+ * accented element (accent tint fill, accent outline); the others are muted on hairlines.
+ */
+@Composable
+fun <T> Segmented(
+    options: List<T>,
+    selected: T,
+    label: (T) -> String,
+    onSelect: (T) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val t = Guard.tokens
+    val colors =
+        SegmentedButtonDefaults.colors(
+            activeContainerColor = t.accentTint,
+            activeContentColor = t.text,
+            activeBorderColor = t.accent,
+            inactiveContainerColor = Color.Transparent,
+            inactiveContentColor = t.muted,
+            inactiveBorderColor = t.hairline,
+        )
+    SingleChoiceSegmentedButtonRow(modifier.fillMaxWidth()) {
+        options.forEachIndexed { i, o ->
+            SegmentedButton(
+                selected = o == selected,
+                onClick = { onSelect(o) },
+                shape = SegmentedButtonDefaults.itemShape(i, options.size),
+                colors = colors,
+                icon = {},
+            ) {
+                Text(label(o), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+    }
+}
+
+@Composable
+fun Chip(label: String, selected: Boolean, onClick: () -> Unit) {
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        label = { Text(label) },
+        modifier = Modifier.padding(end = 6.dp),
+    )
+}
+
+/**
+ * Horizontal share bar on the token track colour. Muted by default; pass the accent only for the
+ * one bar that is the group's active element.
+ */
+@Composable
+fun ShareBar(fraction: Float, modifier: Modifier = Modifier, color: Color = Guard.tokens.muted) {
+    val t = Guard.tokens
+    Box(modifier.fillMaxWidth().height(4.dp).background(t.track, RoundedCornerShape(2.dp))) {
+        Box(
+            Modifier.fillMaxWidth(fraction.coerceIn(0f, 1f))
+                .height(4.dp)
+                .background(color, RoundedCornerShape(2.dp))
+        )
+    }
+}
+
+/** One event row, shared by Activity and the per-app live mini-log. */
+@Composable
+fun EventRow(e: LabeledEvent, showApp: Boolean, modifier: Modifier = Modifier) {
+    val t = Guard.tokens
+    Column(modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(
+                formatClock(e.event.timeMs),
+                style = MaterialTheme.typography.labelSmall.copy(fontFamily = t.mono),
+                color = t.muted,
+            )
+            Text(
+                e.event.destination,
+                style = MaterialTheme.typography.bodyMedium.copy(fontFamily = t.mono),
+                color = if (e.event.blocked) t.muted else t.text,
+                modifier = Modifier.weight(1f),
+            )
+        }
+        Row(Modifier.padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+            Tag(e.event.type.name)
+            if (e.event.blocked) Tag("BLOCKED", danger = true)
+            if (e.tracker != null) Tag(e.tracker, emphasized = true)
+            if (e.event.port != 0) Tag(":${e.event.port}")
+            if (showApp) {
+                Text(
+                    e.appLabel,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = t.muted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+private val clockFormat = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault())
+
+fun formatClock(ms: Long): String = synchronized(clockFormat) { clockFormat.format(Date(ms)) }
+
+fun formatDateTime(ms: Long): String =
+    DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(ms))
+
+fun formatBytes(b: Long): String =
+    when {
+        b >= 1L shl 30 -> "%.1f GB".format(b / (1L shl 30).toDouble())
+        b >= 1L shl 20 -> "%.1f MB".format(b / (1L shl 20).toDouble())
+        b >= 1L shl 10 -> "%.0f kB".format(b / 1024.0)
+        else -> "$b B"
+    }
+
+fun formatAgo(ms: Long, now: Long = System.currentTimeMillis()): String {
+    val d = (now - ms).coerceAtLeast(0) / 1000
+    return when {
+        d < 60 -> "${d}s ago"
+        d < 3600 -> "${d / 60} min ago"
+        d < 86400 -> "${d / 3600} h ago"
+        else -> "${d / 86400} d ago"
+    }
+}

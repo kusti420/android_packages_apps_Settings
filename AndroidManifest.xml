@@ -84,6 +84,14 @@
     <uses-permission android:name="android.permission.MANAGE_DEBUGGING" />
     <!-- IchthysOS: Theme Studio drives IchthysConfigService (ichthys.nix). -->
     <uses-permission android:name="android.permission.MANAGE_ICHTHYS_CONFIG" />
+    <!-- IchthysOS Guard (com.android.settings.ichthys.guard): drives IchthysGuardService
+         ("ichthys_guard"). Signature permission defined by the framework. -->
+    <uses-permission android:name="org.ichthys.permission.MANAGE_ICHTHYS_GUARD" />
+    <!-- IchthysOS Guard: per-uid traffic (Traffic tab) and the permission usage timeline. -->
+    <uses-permission android:name="android.permission.READ_NETWORK_USAGE_HISTORY" />
+    <uses-permission android:name="android.permission.GET_APP_OPS_STATS" />
+    <!-- IchthysOS Guard is a per-app control panel: it has to see every installed app. -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
     <uses-permission android:name="android.permission.SET_POINTER_SPEED" />
     <uses-permission android:name="android.permission.SET_KEYBOARD_LAYOUT" />
     <uses-permission android:name="android.permission.INTERACT_ACROSS_USERS_FULL" />
@@ -6278,6 +6286,79 @@
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
+
+        <!-- IchthysOS Guard: per-app network firewall and activity monitor (formerly the
+             org.ichthys.guard priv-app). Guard keeps its state in credential-protected storage,
+             so none of its components is direct-boot aware. Only Settings' own explicit intents
+             (homepage row, notifications, QS long-press) open it. -->
+        <activity
+            android:name=".ichthys.guard.ui.GuardActivity"
+            android:label="@string/ichthys_guard_title"
+            android:theme="@style/Theme.IchthysGuard"
+            android:exported="false"
+            android:directBootAware="false"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
+            android:launchMode="singleTop" />
+
+        <!-- Notification buttons and the weekly alarm: only Guard's own PendingIntents. -->
+        <receiver
+            android:name=".ichthys.guard.notify.NotificationActionReceiver"
+            android:exported="false"
+            android:directBootAware="false" />
+        <receiver
+            android:name=".ichthys.guard.notify.WeeklyReportReceiver"
+            android:exported="false"
+            android:directBootAware="false" />
+        <receiver
+            android:name=".ichthys.guard.notify.BootReceiver"
+            android:exported="true"
+            android:directBootAware="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+        <!-- Explicit broadcast from IchthysGuardService (system_server) after an install-time
+             scan. NETWORK_STACK is signature-level and held by system_server, so no app can
+             forge it. -->
+        <receiver
+            android:name=".ichthys.guard.notify.AppScannedReceiver"
+            android:exported="true"
+            android:directBootAware="false"
+            android:permission="android.permission.NETWORK_STACK">
+            <intent-filter>
+                <action android:name="org.ichthys.guard.action.APP_SCANNED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- IchthysOS Guard Quick Settings tiles: Lockdown panic switch and 5-minute pause.
+             Long-press goes through QSTileLongPressGatewayActivity to GuardActivity. Interim:
+             these become native SystemUI tiles later. -->
+        <service
+            android:name=".ichthys.guard.notify.LockdownTileService"
+            android:exported="true"
+            android:directBootAware="false"
+            android:icon="@drawable/ic_ichthys_guard_notify"
+            android:label="@string/ichthys_guard_tile_lockdown"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+            <meta-data android:name="android.service.quicksettings.TOGGLEABLE_TILE"
+                       android:value="true" />
+        </service>
+        <service
+            android:name=".ichthys.guard.notify.PauseTileService"
+            android:exported="true"
+            android:directBootAware="false"
+            android:icon="@drawable/ic_ichthys_guard_notify"
+            android:label="@string/ichthys_guard_tile_pause"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+            <meta-data android:name="android.service.quicksettings.TOGGLEABLE_TILE"
+                       android:value="true" />
+        </service>
 
         <service
             android:name=".appfunctions.DeviceStateAppFunctionService"

@@ -27,6 +27,9 @@ import com.android.settings.core.SubSettingLauncher
 import com.android.settings.development.AdbWirelessDebuggingFragment
 import com.android.settings.development.AdbWirelessDebuggingPreferenceController
 import com.android.settings.development.qstile.AdbWirelessDebuggingDevelopmentTile
+import com.android.settings.ichthys.guard.notify.LockdownTileService
+import com.android.settings.ichthys.guard.notify.PauseTileService
+import com.android.settings.ichthys.guard.ui.GuardActivity
 import com.android.settings.network.telephony.satellite.quicksettings.SatelliteLandingPageActivity
 import com.android.settings.network.telephony.satellite.quicksettings.SatelliteTileService
 import com.android.settings.network.telephony.satellite.quicksettings.SatelliteUtils
@@ -52,6 +55,16 @@ class QSTileLongPressGatewayActivity : AppCompatActivity() {
                 val intent = SatelliteUtils.resolveSatelliteSettingsIntent(this)
                 intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
                 startActivity(intent)
+                finish()
+                return
+            }
+            // IchthysOS Guard: Lockdown and Pause open the Guard page.
+            LockdownTileService::class.java.name,
+            PauseTileService::class.java.name -> {
+                startActivity(
+                    Intent(this, GuardActivity::class.java)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                )
                 finish()
                 return
             }
