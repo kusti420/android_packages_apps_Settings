@@ -6316,6 +6316,28 @@
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:launchMode="singleTop" />
 
+        <!-- IchthysOS Guard first-launch review sheet (W8b decision 15). Settings is the
+             suspending package of quarantined new apps; the Review button of the system's
+             SuspendedAppActivity starts this through ACTION_SHOW_SUSPENDED_APP_DETAILS. Exported
+             only because that contract requires it: SuspendedAppActivity offers the button only
+             when the handler is protected by SEND_SHOW_SUSPENDED_APP_DETAILS (signature), so
+             nothing but the system can start it. Not direct-boot aware (credential storage). -->
+        <activity
+            android:name=".ichthys.guard.ui.FirstLaunchActivity"
+            android:label="@string/ichthys_guard_title"
+            android:theme="@style/Theme.IchthysGuard.Sheet"
+            android:exported="true"
+            android:permission="android.permission.SEND_SHOW_SUSPENDED_APP_DETAILS"
+            android:directBootAware="false"
+            android:taskAffinity=""
+            android:excludeFromRecents="true"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden">
+            <intent-filter>
+                <action android:name="android.intent.action.SHOW_SUSPENDED_APP_DETAILS" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
         <!-- Notification buttons and the weekly alarm: only Guard's own PendingIntents. -->
         <receiver
             android:name=".ichthys.guard.notify.NotificationActionReceiver"

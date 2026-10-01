@@ -35,4 +35,56 @@
     <string name="ichthys_guard_tile_paused">Guard paused</string>
     <string name="ichthys_guard_tile_paused_until">until <xliff:g id="time">%1$s</xliff:g></string>
     <string name="ichthys_guard_tile_pause_duration">5 min</string>
+
+    <!-- First-launch review sheet (FirstLaunchActivity): shown when the user opens a newly
+         installed, still quarantined app and taps Review in the system's suspended-app dialog. -->
+    <string name="ichthys_guard_first_launch_intro">This app hasn\'t run yet. Choose how Guard treats it before it opens.</string>
+    <string name="ichthys_guard_first_launch_installer">Installed by <xliff:g id="installer">%1$s</xliff:g></string>
+    <string name="ichthys_guard_first_launch_section_trackers">Trackers</string>
+    <string name="ichthys_guard_first_launch_section_permissions">Permissions requested</string>
+    <string name="ichthys_guard_first_launch_section_recommended">Recommended</string>
+    <string name="ichthys_guard_first_launch_no_trackers">No known trackers</string>
+    <string name="ichthys_guard_first_launch_scan_pending">Tracker scan not finished yet</string>
+    <plurals name="ichthys_guard_first_launch_trackers_found">
+        <item quantity="one"><xliff:g id="count">%d</xliff:g> tracker found</item>
+        <item quantity="other"><xliff:g id="count">%d</xliff:g> trackers found</item>
+    </plurals>
+    <string name="ichthys_guard_first_launch_no_permissions">No runtime permissions requested</string>
+    <string name="ichthys_guard_first_launch_loading">Loading…</string>
+
+    <!-- Permission groups, plain language -->
+    <string name="ichthys_guard_perm_location">Location</string>
+    <string name="ichthys_guard_perm_camera">Camera</string>
+    <string name="ichthys_guard_perm_microphone">Microphone</string>
+    <string name="ichthys_guard_perm_contacts">Contacts</string>
+    <string name="ichthys_guard_perm_sms_calls">SMS and calls</string>
+    <string name="ichthys_guard_perm_storage_media">Storage and media</string>
+    <string name="ichthys_guard_perm_nearby_devices">Nearby devices</string>
+    <string name="ichthys_guard_perm_notifications">Notifications</string>
+    <string name="ichthys_guard_perm_internet">Full internet access</string>
+
+    <!-- Recommendation lines: topic, chosen value, one-line reason -->
+    <string name="ichthys_guard_advice_topic_network">Network</string>
+    <string name="ichthys_guard_advice_topic_trackers">Trackers</string>
+    <string name="ichthys_guard_advice_topic_exceptions">Privacy exceptions</string>
+    <string name="ichthys_guard_advice_value_network_open">Open, monitored</string>
+    <string name="ichthys_guard_advice_value_network_unused">Not requested</string>
+    <string name="ichthys_guard_advice_value_trackers_strict">Strict</string>
+    <string name="ichthys_guard_advice_value_trackers_known">Block known trackers</string>
+    <string name="ichthys_guard_advice_value_trackers_off">Off</string>
+    <string name="ichthys_guard_advice_value_exceptions_closed">Closed</string>
+    <string name="ichthys_guard_advice_network_shielded">Shielded default: connections allowed, every one monitored.</string>
+    <string name="ichthys_guard_advice_network_not_requested">It doesn\'t ask for internet access, so there is nothing to restrict.</string>
+    <string name="ichthys_guard_advice_trackers_strict">Several trackers found: only hosts you allow are reachable.</string>
+    <string name="ichthys_guard_advice_trackers_known">Trackers found: their known hosts are blocked.</string>
+    <string name="ichthys_guard_advice_trackers_browser">A browser: strict mode would break websites, so the default stays.</string>
+    <string name="ichthys_guard_advice_trackers_none">None found; known tracker hosts stay blocked anyway.</string>
+    <string name="ichthys_guard_advice_trackers_unknown">Scan not available yet, so the default stays.</string>
+    <string name="ichthys_guard_advice_exceptions_closed">Contacts, clipboard and sensors stay locked down until you allow them.</string>
+
+    <!-- First-launch buttons -->
+    <string name="ichthys_guard_first_launch_apply">Apply recommended</string>
+    <string name="ichthys_guard_first_launch_customize">Customize</string>
+    <string name="ichthys_guard_first_launch_as_is">Open as-is</string>
+    <string name="ichthys_guard_first_launch_failed">Couldn\'t release <xliff:g id="app">%1$s</xliff:g></string>
 </resources>
