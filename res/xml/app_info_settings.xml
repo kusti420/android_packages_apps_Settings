@@ -59,6 +59,13 @@
         settings:summaryLineCount="1"
         settings:controller="com.android.settings.applications.appinfo.AppPermissionPreferenceController" />
 
+    <!-- IchthysOS: this app's page in Guard (network, trackers, data access). -->
+    <Preference
+        android:key="ichthys_guard"
+        android:title="@string/ichthys_guard_title"
+        android:summary="@string/ichthys_guard_app_info_summary"
+        settings:controller="com.android.settings.applications.appinfo.AppGuardPreferenceController" />
+
     <Preference
         android:key="manage_target_app_function_access_settings"
         android:title="@string/manage_target_app_function_access_settings_title"

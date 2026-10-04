@@ -527,7 +527,8 @@ public class DevelopmentSettingsDashboardFragment extends RestrictedDashboardFra
         controllers.add(new WebViewDevUiPreferenceController(context));
         controllers.add(new CoolColorTemperaturePreferenceController(context));
         controllers.add(new DisableAutomaticUpdatesPreferenceController(context));
-        controllers.add(new SelectDSUPreferenceController(context));
+        // IchthysOS: SelectDSUPreferenceController is not registered; DSU is not shipped and its
+        // "dsu_loader" row is removed from development_settings.xml.
         controllers.add(new AdbPreferenceController(context, fragment));
         controllers.add(new ClearAdbKeysPreferenceController(context, fragment));
         controllers.add(new AdbWirelessDebuggingPreferenceController(context, lifecycle));

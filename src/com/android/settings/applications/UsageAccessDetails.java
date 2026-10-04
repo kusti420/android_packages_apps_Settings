@@ -38,9 +38,11 @@ import androidx.appcompat.app.AlertDialog;
 import androidx.preference.Preference;
 import androidx.preference.Preference.OnPreferenceChangeListener;
 import androidx.preference.Preference.OnPreferenceClickListener;
+import androidx.preference.SwitchPreferenceCompat;
 
 import com.android.settings.R;
 import com.android.settings.applications.AppStateUsageBridge.UsageState;
+import com.android.settings.ichthys.protect.IchthysUsageHistory;
 import com.android.settings.overlay.FeatureFactory;
 import com.android.settingslib.RestrictedSwitchPreference;
 import com.android.settingslib.core.instrumentation.MetricsFeatureProvider;
@@ -58,6 +60,8 @@ public class UsageAccessDetails extends AppInfoWithHeader implements OnPreferenc
     private AppStateUsageBridge mUsageBridge;
     private AppOpsManager mAppOpsManager;
     private RestrictedSwitchPreference mSwitchPref;
+    // IchthysOS (Guard decision 34): real history vs the empty default.
+    private SwitchPreferenceCompat mFullHistoryPref;
     private Preference mUsageDesc;
     private Intent mSettingsIntent;
     private UsageState mUsageState;
@@ -86,6 +90,8 @@ public class UsageAccessDetails extends AppInfoWithHeader implements OnPreferenc
         mUsageDesc.setTitle(R.string.usage_access_description);
 
         mSwitchPref.setOnPreferenceChangeListener(this);
+        mFullHistoryPref =
+                IchthysUsageHistory.addSwitch(getPreferenceScreen(), mPackageName, mUserId);
 
         mSettingsIntent = new Intent(Intent.ACTION_MAIN)
                 .addCategory(Settings.INTENT_CATEGORY_USAGE_ACCESS_CONFIG)
@@ -180,6 +186,8 @@ public class UsageAccessDetails extends AppInfoWithHeader implements OnPreferenc
 
         mSwitchPref.setChecked(hasAccess);
         mSwitchPref.setEnabled(shouldEnable);
+        IchthysUsageHistory.refresh(mFullHistoryPref, mPackageName, mUserId,
+                mPackageInfo.applicationInfo, hasAccess);
 
         ResolveInfo resolveInfo = mPm.resolveActivityAsUser(mSettingsIntent,
                 PackageManager.GET_META_DATA, mUserId);

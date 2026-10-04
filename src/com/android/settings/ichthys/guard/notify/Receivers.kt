@@ -20,6 +20,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import com.android.settings.ichthys.guard.data.GuardRepository
+import com.android.settings.ichthys.guard.model.AlertType
 import com.android.settings.ichthys.guard.model.NetworkAccess
 import com.android.settings.ichthys.guard.model.TrackerBlockLevel
 
@@ -33,18 +34,30 @@ class PackageAddedReceiver : BroadcastReceiver() {
         if (intent.getBooleanExtra(Intent.EXTRA_REPLACING, false)) return
         val pkg = intent.data?.schemeSpecificPart ?: return
         runAsync {
-            GuardRepository.get(context).refreshApps()
+            val repo = GuardRepository.get(context)
+            repo.refreshApps()
             GuardNotifications.notifyNewApp(context, pkg)
+            repo.riskFactsFor(pkg)
         }
     }
 }
 
 /**
- * Explicit broadcast from IchthysGuardService after its install-time scan finished, so the
- * notification carries the real tracker count even when the Settings process wasn't running.
+ * Explicit broadcasts from IchthysGuardService (sender must hold NETWORK_STACK): after its
+ * install-time scan finished, so the notification carries the real tracker count even when the
+ * Settings process wasn't running; and [GuardNotifications.ACTION_ALERT] behaviour alerts.
  */
 class AppScannedReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action == GuardNotifications.ACTION_ALERT) {
+            val pkg = intent.getStringExtra(GuardNotifications.EXTRA_PACKAGE) ?: return
+            val type =
+                AlertType.fromBit(intent.getIntExtra(GuardNotifications.EXTRA_ALERT_TYPE, 0))
+                    ?: return
+            val detail = intent.getStringExtra(GuardNotifications.EXTRA_DETAIL) ?: type.summary
+            runAsync { GuardNotifications.notifyAlert(context, pkg, type, detail) }
+            return
+        }
         if (intent.action != GuardNotifications.ACTION_APP_SCANNED) return
         val pkg = intent.getStringExtra(GuardNotifications.EXTRA_PACKAGE) ?: return
         runAsync {
@@ -54,9 +67,26 @@ class AppScannedReceiver : BroadcastReceiver() {
     }
 }
 
-/** "Block network" / "Strict" buttons on the new-app notification. */
+/**
+ * "Block network" / "Strict" buttons on the new-app notification, plus Guard's own alarms: the
+ * profile schedule ([GuardNotifications.ACTION_PROFILE_TICK]) and daily maintenance
+ * ([GuardNotifications.ACTION_MAINTENANCE], auto-tighten). All explicit PendingIntents.
+ */
 class NotificationActionReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        when (intent.action) {
+            GuardNotifications.ACTION_PROFILE_TICK -> {
+                runAsync { GuardRepository.get(context).onScheduleTick() }
+                return
+            }
+            GuardNotifications.ACTION_MAINTENANCE -> {
+                runAsync {
+                    val paused = GuardRepository.get(context).runMaintenance()
+                    GuardNotifications.notifyTightened(context, paused)
+                }
+                return
+            }
+        }
         val pkg = intent.getStringExtra(GuardNotifications.EXTRA_PACKAGE) ?: return
         runAsync {
             val repo = GuardRepository.get(context)
@@ -92,9 +122,44 @@ class BootReceiver : BroadcastReceiver() {
         runAsync {
             GuardNotifications.init(context)
             GuardNotifications.scheduleWeeklyReport(context)
+            GuardNotifications.scheduleMaintenance(context)
             val repo = GuardRepository.get(context)
             repo.refreshApps()
             repo.pushAllNetworkPolicies()
+            repo.pushBehaviours()
+            repo.scheduleProfileTick()
         }
+    }
+}
+
+/**
+ * The native SystemUI "Guard lockdown" tile reads and sets lockdown here (lockdown state lives in
+ * [GuardRepository], not in IchthysGuardService). An ordered broadcast guarded by
+ * MANAGE_ICHTHYS_GUARD; an "enabled" extra sets the state, and the result code reports it
+ * (1 = on, 0 = off).
+ */
+class LockdownControlReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action != ACTION_LOCKDOWN) return
+        val pending = goAsync()
+        Thread {
+                try {
+                    val repo = GuardRepository.get(context)
+                    if (intent.hasExtra(EXTRA_ENABLED)) {
+                        repo.setLockdown(intent.getBooleanExtra(EXTRA_ENABLED, false))
+                    }
+                    pending.resultCode = if (repo.rules.value.lockdown.enabled) 1 else 0
+                } finally {
+                    pending.finish()
+                }
+            }
+            .start()
+    }
+
+    companion object {
+        const val ACTION_LOCKDOWN = "com.android.settings.ichthys.guard.action.LOCKDOWN"
+        const val ACTION_LOCKDOWN_CHANGED =
+            "com.android.settings.ichthys.guard.action.LOCKDOWN_CHANGED"
+        const val EXTRA_ENABLED = "enabled"
     }
 }

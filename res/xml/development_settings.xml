@@ -114,8 +114,9 @@
             android:title="@string/ota_disable_automatic_update"
             android:summary="@string/ota_disable_automatic_update_summary" />
 
-        <Preference android:key="dsu_loader"
-                    android:title="@string/dsu_loader_title" />
+        <!-- IchthysOS: no "DSU Loader" row. Dynamic System Updates are not shipped
+             (DynamicSystemInstallationService, gsid and gsi_tool are removed), so there is
+             nothing for it to launch. -->
 
         <Preference
             android:key="demo_mode"

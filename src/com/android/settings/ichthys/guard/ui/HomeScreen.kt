@@ -16,6 +16,7 @@
 
 package com.android.settings.ichthys.guard.ui
 
+import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -37,20 +38,70 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.android.settings.ichthys.guard.data.GuardRepository
 import com.android.settings.ichthys.guard.model.PeriodReport
+import com.android.settings.ichthys.guard.os.SHIELD_SECTIONS
 import com.android.settings.ichthys.guard.ui.theme.Guard
 import kotlinx.coroutines.delay
 
-/** Overview: today's score and counts, top tracker companies, pause and lockdown. */
+/** Every OS master switch on the shields card, for the live re-read. */
+private val SHIELD_URIS: List<Uri> by lazy {
+    SHIELD_SECTIONS.flatMap { it.second }.flatMap { it.switches }.map { it.uri }
+}
+
+/**
+ * The OS shields' master switches, the only place they are shown: a handful of rows, each
+ * switching the shields of one kind of data together (see [SHIELD_SECTIONS]). On = protected for
+ * every app; one app's real access is on its own page (Data access).
+ */
+@Composable
+private fun ShieldsCard(repo: GuardRepository) {
+    val resolver = LocalContext.current.contentResolver
+    val t = Guard.tokens
+    // Re-read after every change: here (version) and anywhere else (tick).
+    var version by remember { mutableIntStateOf(0) }
+    val tick = rememberSettingsTick(SHIELD_URIS)
+    GuardCard(title = "Shields for every app") {
+        Text(
+            "What apps get of your data unless you give one real access on its own page (Apps, " +
+                "Data access). System apps and your default phone and SMS apps are exempt.",
+            style = MaterialTheme.typography.bodySmall,
+            color = t.muted,
+        )
+        for ((section, rows) in SHIELD_SECTIONS) {
+            SectionLabel(section, Modifier.padding(top = 12.dp))
+            for (row in rows) {
+                val states = remember(version, tick, row) { row.switches.map { it.isOn(resolver) } }
+                val allOn = states.all { it }
+                ToggleRow(
+                    row.label,
+                    allOn,
+                    when {
+                        allOn -> row.protectedText
+                        states.any { it } -> "Partly on: switch on to protect all of it"
+                        else -> "Off: every app gets real access"
+                    },
+                ) { on ->
+                    repo.setShields(row.switches, on)
+                    version++
+                }
+            }
+        }
+    }
+}
+
+/** Overview: today's score and counts, the shields, pause and lockdown, top tracker companies. */
 @Composable
 fun HomeScreen(
     vm: GuardViewModel,
@@ -80,7 +131,7 @@ fun HomeScreen(
             item {
                 GuardCard(title = "Service unavailable") {
                     Text(
-                        "The ichthys_guard platform service isn't reachable, so no live traffic is shown and network rules aren't enforced. Policies and OS exceptions are still saved and applied once it is back.",
+                        "The ichthys_guard platform service isn't reachable, so no live traffic is shown and network rules aren't enforced. Network policies are still saved and applied once it is back; the shields and data access don't depend on it.",
                         style = MaterialTheme.typography.bodySmall,
                         color = t.muted,
                     )
@@ -89,9 +140,11 @@ fun HomeScreen(
         }
         if (!status.osWritable) {
             item {
-                GuardCard(title = "OS exceptions not applied") {
+                GuardCard(title = "Shields not applied") {
                     Text(
-                        "Settings couldn't write the privacy exception settings (WRITE_SECURE_SETTINGS denied).",
+                        "Settings couldn't write the shield settings (WRITE_SECURE_SETTINGS " +
+                            "denied), so the last change to a shield or to an app's data " +
+                            "access wasn't saved.",
                         color = t.danger,
                         style = MaterialTheme.typography.bodySmall,
                     )
@@ -277,6 +330,7 @@ fun HomeScreen(
                 }
             }
         }
+        item { ShieldsCard(vm.repo) }
         item {
             GuardCard(title = "Top tracker companies today") {
                 if (s.topCompanies.isEmpty())

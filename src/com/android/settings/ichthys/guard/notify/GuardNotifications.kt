@@ -30,6 +30,7 @@ import android.os.UserManager
 import android.util.Log
 import com.android.settings.R
 import com.android.settings.ichthys.guard.data.GuardRepository
+import com.android.settings.ichthys.guard.model.AlertType
 import com.android.settings.ichthys.guard.model.PeriodReport
 import com.android.settings.ichthys.guard.model.StatsHistory
 import com.android.settings.ichthys.guard.ui.GuardActivity
@@ -61,9 +62,25 @@ object GuardNotifications {
      * standalone app.
      */
     const val ACTION_APP_SCANNED = "org.ichthys.guard.action.APP_SCANNED"
+    /**
+     * Explicit broadcast from IchthysGuardService with one behaviour alert (extras [EXTRA_PACKAGE],
+     * [EXTRA_ALERT_TYPE], [EXTRA_DETAIL]). Sent to AppScannedReceiver's component, so it reuses
+     * that receiver's manifest entry and its NETWORK_STACK sender permission.
+     */
+    const val ACTION_ALERT = "org.ichthys.guard.action.ALERT"
+    const val EXTRA_ALERT_TYPE = "alert_type"
+    const val EXTRA_DETAIL = "detail"
+    /** Profile schedule alarm (explicit, to NotificationActionReceiver). */
+    const val ACTION_PROFILE_TICK = "com.android.settings.ichthys.guard.action.PROFILE_TICK"
+    /** Daily maintenance alarm: auto-tighten unused apps. */
+    const val ACTION_MAINTENANCE = "com.android.settings.ichthys.guard.action.MAINTENANCE"
     private const val REPORT_ID = 0x16a0
+    private const val TIGHTEN_ID = 0x16a1
+    private const val ALERT_ID_BASE = 0x2000000
     private const val PREFS = "ichthys_guard_notify"
     private const val KEY_CHANGED_SEQ = "changed_seq"
+    /** Local hour of the daily maintenance alarm: a time the phone is normally idle. */
+    private const val MAINTENANCE_HOUR = 4
 
     @Volatile private var initialized = false
 
@@ -78,6 +95,7 @@ object GuardNotifications {
         try {
             createChannels(app)
             scheduleWeeklyReport(app)
+            scheduleMaintenance(app)
             val filter =
                 IntentFilter(Intent.ACTION_PACKAGE_ADDED).apply { addDataScheme("package") }
             app.registerReceiver(PackageAddedReceiver(), filter, Context.RECEIVER_EXPORTED)
@@ -130,6 +148,31 @@ object GuardNotifications {
             AlarmManager.INTERVAL_DAY * 7,
             reportAlarmIntent(ctx),
         )
+    }
+
+    /**
+     * Daily, inexact: auto-tighten runs in [NotificationActionReceiver]. Anchored to the next
+     * [MAINTENANCE_HOUR]:00, like the weekly report, so setting it again (every Settings process
+     * start and boot) replaces the alarm with the same one instead of pushing it back.
+     */
+    fun scheduleMaintenance(ctx: Context) {
+        val am = ctx.getSystemService(AlarmManager::class.java) ?: return
+        val pi =
+            PendingIntent.getBroadcast(
+                ctx,
+                2,
+                Intent(ctx, NotificationActionReceiver::class.java).setAction(ACTION_MAINTENANCE),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+        val cal =
+            Calendar.getInstance().apply {
+                set(Calendar.HOUR_OF_DAY, MAINTENANCE_HOUR)
+                set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+                if (timeInMillis <= System.currentTimeMillis()) add(Calendar.DAY_OF_YEAR, 1)
+            }
+        am.setInexactRepeating(AlarmManager.RTC, cal.timeInMillis, AlarmManager.INTERVAL_DAY, pi)
     }
 
     private fun reportAlarmIntent(ctx: Context): PendingIntent =
@@ -277,6 +320,58 @@ object GuardNotifications {
                 .setTimeoutAfter(15_000)
                 .build()
         ctx.getSystemService(NotificationManager::class.java).notify(notificationId(pkg), n)
+    }
+
+    /**
+     * One behaviour alert from IchthysGuardService (W8b decisions 9, 35): informational only, it
+     * opens the app's page. Dropped when that alert type is switched off in Guard.
+     */
+    fun notifyAlert(ctx: Context, pkg: String, type: AlertType, detail: String) {
+        if (pkg == ctx.packageName || !canNotify(ctx)) return
+        val repo = GuardRepository.get(ctx)
+        if (!repo.automation.value.alertOn(type)) return
+        val label =
+            try {
+                val pm = ctx.packageManager
+                pm.getApplicationInfo(pkg, PackageManager.ApplicationInfoFlags.of(0))
+                    .loadLabel(pm)
+                    .toString()
+            } catch (ignored: PackageManager.NameNotFoundException) {
+                return
+            }
+        val n =
+            Notification.Builder(ctx, CHANNEL_ALERTS)
+                .setSmallIcon(R.drawable.ic_ichthys_guard_notify)
+                .setContentTitle(label)
+                .setContentText(detail)
+                .setSubText(type.label)
+                .setStyle(Notification.BigTextStyle().bigText(detail))
+                .setContentIntent(openAppIntent(ctx, pkg))
+                .setAutoCancel(true)
+                .build()
+        ctx.getSystemService(NotificationManager::class.java)
+            .notify(ALERT_ID_BASE + ((pkg + type.name).hashCode() and 0xFFFFFF), n)
+    }
+
+    /** After auto-tighten paused apps. */
+    fun notifyTightened(ctx: Context, labels: List<String>) {
+        if (labels.isEmpty() || !canNotify(ctx)) return
+        val days = GuardRepository.get(ctx).automation.value.autoTightenDays
+        val text =
+            labels.joinToString() +
+                " — unused for $days days, network cut. Opening one shows Guard's review."
+        val n =
+            Notification.Builder(ctx, CHANNEL_ALERTS)
+                .setSmallIcon(R.drawable.ic_ichthys_guard_notify)
+                .setContentTitle(
+                    "Guard paused ${labels.size} unused app${if (labels.size == 1) "" else "s"}"
+                )
+                .setContentText(text)
+                .setStyle(Notification.BigTextStyle().bigText(text))
+                .setContentIntent(openAppIntent(ctx, null))
+                .setAutoCancel(true)
+                .build()
+        ctx.getSystemService(NotificationManager::class.java).notify(TIGHTEN_ID, n)
     }
 
     fun postWeeklyReport(ctx: Context) {

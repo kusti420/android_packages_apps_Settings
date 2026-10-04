@@ -101,6 +101,9 @@ import kotlinx.coroutines.withContext
  * ([FirstLaunchAdvisor]). Each button sets the policy, lifts Settings' suspension and starts the
  * app; back or a tap outside the sheet leaves it quarantined.
  *
+ * Apps auto-tightened after weeks unused (GuardRepository.runMaintenance) are suspended the same
+ * way, so reopening one lands here too; every choice gives it its network back.
+ *
  * Exported only because the contract requires it: the activity is protected by the signature
  * permission SEND_SHOW_SUSPENDED_APP_DETAILS, which SuspendedAppActivity checks for before it
  * offers the button. Not direct-boot aware (Guard's state is credential-protected).
@@ -135,8 +138,19 @@ class FirstLaunchActivity : ComponentActivity() {
         val (released, launch) =
             withContext(Dispatchers.IO) {
                 if (choice == SheetChoice.APPLY) {
-                    // The same path the app page uses: store, OS allowlists and the service.
-                    sheet.repo.updatePolicy(pkg) { sheet.recommendation.policy }
+                    // The same path the app page uses: store, OS allowlists and the service. A
+                    // new app has no policy yet, so the recommendation becomes it. One paused by
+                    // auto-tighten keeps what the user set up; only the recommendation is merged
+                    // in and the pause lifted.
+                    sheet.repo.updatePolicy(pkg) { old ->
+                        if (old.dormant) sheet.recommendation.mergedInto(old)
+                        else sheet.recommendation.policy
+                    }
+                }
+                // An app auto-tightened for being unused (also suspended by Settings) gets its
+                // network back with any choice: the user just opened it.
+                if (sheet.repo.policies.value.policyFor(pkg).dormant) {
+                    sheet.repo.updatePolicy(pkg) { it.copy(dormant = false) }
                 }
                 if (!unsuspend(pkg)) return@withContext false to null
                 true to packageManager.getLaunchIntentForPackage(pkg)

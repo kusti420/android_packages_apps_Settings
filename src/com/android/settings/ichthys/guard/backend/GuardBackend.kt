@@ -58,6 +58,26 @@ interface GuardBackend {
 
     /** Wall-clock end of the current pause, or 0 when enforcing. */
     fun getPausedUntil(): Long
+
+    /**
+     * Replaces the behaviour table (uid → [BehaviourFlags] bits); unlisted uids get none. Screen-off
+     * and foreground-only are enforced on the firewall chain, LAN through the stock permission.
+     */
+    fun replaceBehaviours(flags: Map<Int, Int>)
+
+    /** True when [uid]'s local network is blocked (explicitly, or as an app new since setup). */
+    fun isLanDenied(uid: Int): Boolean
+
+    /** Which [com.android.settings.ichthys.guard.model.AlertType] bits the service reports. */
+    fun setAlertMask(mask: Int)
+}
+
+/** IIchthysGuard.BEHAVIOUR_* values (kept here so the model needs no framework classes). */
+object BehaviourFlags {
+    const val SCREEN_OFF_DENY = 1
+    const val FOREGROUND_ONLY = 2
+    const val LAN_DENY = 4
+    const val LAN_ALLOW = 8
 }
 
 internal fun NetworkAccess.toWire(): Int =

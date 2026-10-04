@@ -50,6 +50,7 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -79,7 +80,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
-/** Activity tab state: filter, grouping and a pausable (frozen) view of the live stream. */
+/** Live log state: filter, grouping and a pausable (frozen) view of the live stream. */
 class ActivityViewModel(app: Application) : AndroidViewModel(app) {
     private val repo = GuardRepository.get(app)
 
@@ -154,10 +155,54 @@ private fun group(events: List<LabeledEvent>, grouping: Grouping): List<EventGro
                 .sortedByDescending { it.events.size }
     }
 
+/** The sections of the Activity tab: the live log and the totals over a period. */
+enum class ActivitySection(val label: String) {
+    LIVE("Live"),
+    DATA("Data"),
+    HOSTS("Hosts"),
+    TRACKERS("Trackers"),
+}
+
+/**
+ * The Activity tab: what the apps do on the network, as one page with four sections. Live is the
+ * DNS/connect log; Data (bytes per app), Hosts (top destinations) and Trackers (tracker share per
+ * app) are the totals over a period (see [TrafficSection]).
+ */
+@Composable
+fun ActivityScreen(
+    vm: GuardViewModel,
+    onOpenApp: (String) -> Unit,
+    onOpenHost: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var section by rememberSaveable { mutableStateOf(ActivitySection.LIVE) }
+    Column(modifier.fillMaxSize()) {
+        Column(Modifier.padding(horizontal = 16.dp).padding(top = 8.dp)) {
+            Text("Activity", style = MaterialTheme.typography.headlineSmall)
+            Segmented(
+                options = ActivitySection.entries.toList(),
+                selected = section,
+                label = { it.label },
+                onSelect = { section = it },
+                modifier = Modifier.padding(top = 8.dp),
+            )
+        }
+        if (section == ActivitySection.LIVE) {
+            LiveLog(vm, onOpenApp, onOpenHost)
+        } else {
+            TrafficSection(vm, section, onOpenApp, onOpenHost)
+        }
+    }
+}
+
 /** Live DNS/connect stream with filters, grouping and per-row actions. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ActivityScreen(vm: GuardViewModel, onOpenApp: (String) -> Unit, modifier: Modifier = Modifier) {
+private fun LiveLog(
+    vm: GuardViewModel,
+    onOpenApp: (String) -> Unit,
+    onOpenHost: (String) -> Unit,
+) {
     val avm: ActivityViewModel = viewModel()
     val filter by avm.filter.collectAsStateWithLifecycle()
     val grouping by avm.grouping.collectAsStateWithLifecycle()
@@ -187,22 +232,19 @@ fun ActivityScreen(vm: GuardViewModel, onOpenApp: (String) -> Unit, modifier: Mo
             }
         }
 
-    Column(modifier.fillMaxSize()) {
+    Column(Modifier.fillMaxSize()) {
         Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    "Activity",
-                    style = MaterialTheme.typography.headlineSmall,
+                    when {
+                        !paused -> "${visible.size} events"
+                        newCount > 0 -> "Paused · $newCount new"
+                        else -> "Paused"
+                    },
+                    style = MaterialTheme.typography.labelMedium.copy(fontFamily = t.mono),
+                    color = t.muted,
                     modifier = Modifier.weight(1f),
                 )
-                if (paused && newCount > 0) {
-                    Text(
-                        "$newCount new",
-                        style = MaterialTheme.typography.labelMedium.copy(fontFamily = t.mono),
-                        color = t.text,
-                        modifier = Modifier.padding(end = 8.dp),
-                    )
-                }
                 TextButton(
                     onClick = { exporter.launch("guard-activity.csv") },
                     enabled = visible.isNotEmpty(),
@@ -306,7 +348,7 @@ fun ActivityScreen(vm: GuardViewModel, onOpenApp: (String) -> Unit, modifier: Mo
 
     selected?.let { e ->
         ModalBottomSheet(onDismissRequest = { selected = null }) {
-            EventActions(vm, e, onOpenApp) { selected = null }
+            EventActions(vm, e, onOpenApp, onOpenHost) { selected = null }
         }
     }
 }
@@ -383,6 +425,7 @@ private fun EventActions(
     vm: GuardViewModel,
     e: LabeledEvent,
     onOpenApp: (String) -> Unit,
+    onOpenHost: (String) -> Unit,
     dismiss: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -425,6 +468,10 @@ private fun EventActions(
             modifier = Modifier.padding(vertical = 12.dp),
         )
         if (host.isNotEmpty()) {
+            ActionRow("Every app that reached ${e.event.destination}") {
+                dismiss()
+                onOpenHost(e.event.destination)
+            }
             if (pkg != null) {
                 ActionRow("Block host for ${e.appLabel}") {
                     repo.blockHost(pkg, host)

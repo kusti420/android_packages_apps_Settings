@@ -28,7 +28,7 @@ import com.android.settings.SettingsPreferenceFragment
 import com.android.settings.ichthys.gallery.GalleryCleanup.Category
 import java.util.concurrent.Executors
 
-/** Settings → Storage → Gallery clean-up (also opened from Guard; same state). */
+/** Settings → Storage → Gallery clean-up. */
 class GalleryCleanupSettings : SettingsPreferenceFragment() {
     private val executor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -48,6 +48,14 @@ class GalleryCleanupSettings : SettingsPreferenceFragment() {
                     applyInBackground()
                     true
                 }
+            }
+        }
+        // Filtered by MediaProvider at query time: no markers to place, nothing to rescan.
+        findPreference<TwoStatePreference>(GalleryCleanup.KEY_HIDE_TINY)?.apply {
+            isChecked = GalleryCleanup.isTinyHidden(context)
+            setOnPreferenceChangeListener { _, value ->
+                GalleryCleanup.setTinyHidden(context, value as Boolean)
+                true
             }
         }
     }

@@ -16,7 +16,6 @@
 
 package com.android.settings.ichthys.guard.ui
 
-import android.app.settings.SettingsEnums
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -57,9 +56,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.android.settings.R
-import com.android.settings.core.SubSettingLauncher
-import com.android.settings.ichthys.gallery.GalleryCleanupSettings
 import com.android.settings.ichthys.guard.data.GuardRepository
 import com.android.settings.ichthys.guard.model.CustomRule
 import com.android.settings.ichthys.guard.model.HostPattern
@@ -72,7 +68,11 @@ import kotlinx.coroutines.withContext
 
 /** Custom rules, per-app host lists, blocklist sources, lockdown allowlist, import/export. */
 @Composable
-fun RulesScreen(vm: GuardViewModel, modifier: Modifier = Modifier) {
+fun RulesScreen(
+    vm: GuardViewModel,
+    modifier: Modifier = Modifier,
+    onOpenAutomation: () -> Unit = {},
+) {
     val repo = vm.repo
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -141,6 +141,28 @@ fun RulesScreen(vm: GuardViewModel, modifier: Modifier = Modifier) {
                         Text(m, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
                         TextButton(onClick = { message = null }) { Text("Dismiss") }
                     }
+                }
+            }
+        }
+
+        item {
+            val auto by repo.automation.collectAsStateWithLifecycle()
+            val active = auto.activeProfiles()
+            GuardCard(Modifier.clickable(onClick = onOpenAutomation), title = "Automation") {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            "Profiles, alerts, screen-off and auto-tighten",
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
+                        Text(
+                            if (active.isEmpty()) "${auto.profiles.count { it.enabled }} profiles on"
+                            else "Active now: " + active.joinToString { it.name },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Guard.tokens.muted,
+                        )
+                    }
+                    Text("›", color = Guard.tokens.muted)
                 }
             }
         }
@@ -398,28 +420,6 @@ fun RulesScreen(vm: GuardViewModel, modifier: Modifier = Modifier) {
                                 )
                             }
                         }
-                }
-            }
-        }
-
-        item {
-            GuardCard(title = "Gallery clean-up") {
-                Text(
-                    "Keep app caches, messenger stickers and cover-art caches out of gallery apps. Same switches as Settings > Storage.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Guard.tokens.muted,
-                )
-                OutlinedButton(
-                    onClick = {
-                        SubSettingLauncher(context)
-                            .setDestination(GalleryCleanupSettings::class.java.name)
-                            .setTitleRes(R.string.ichthys_gallery_cleanup_title)
-                            .setSourceMetricsCategory(SettingsEnums.PAGE_UNKNOWN)
-                            .launch()
-                    },
-                    modifier = Modifier.padding(top = 8.dp),
-                ) {
-                    Text("Open")
                 }
             }
         }

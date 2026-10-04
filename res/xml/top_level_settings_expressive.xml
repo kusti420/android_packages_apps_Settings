@@ -24,28 +24,20 @@
         android:order="-140"
         android:key="top_level_account_category"/>
 
-    <!-- IchthysOS Shoal: protections summary card; opens the IchthysOS page. -->
+    <!-- IchthysOS: the one IchthysOS entry. It opens crDroidSettingsLayout (ichthys_hub.xml in
+         crDroidSettings): the Protected card, which opens Guard, and the Look, Privacy (Guard),
+         Apps and System rows. It replaces the Protected card and the Guard row that used to be
+         here and the IchthysOS row further down. -->
     <com.android.settingslib.widget.UntitledPreferenceCategory
         android:order="-135"
-        android:key="top_level_ichthys_protected_category">
-        <com.android.settings.ichthys.ShoalProtectedPreference
-            android:key="top_level_ichthys_protected"
-            android:fragment="com.crdroid.settings.fragments.IchthysOS" />
-    </com.android.settingslib.widget.UntitledPreferenceCategory>
-
-    <!-- IchthysOS: Guard, the per-app network firewall and activity monitor (GuardActivity). -->
-    <com.android.settingslib.widget.UntitledPreferenceCategory
-        android:order="-134"
-        android:key="top_level_ichthys_guard_category">
+        android:key="top_level_ichthys_category">
         <com.android.settings.widget.HomepagePreference
-            android:icon="@drawable/ic_ichthys_guard"
-            android:key="top_level_ichthys_guard"
-            android:title="@string/ichthys_guard_title"
-            android:summary="@string/ichthys_guard_summary">
-            <intent
-                android:targetPackage="com.android.settings"
-                android:targetClass="com.android.settings.ichthys.guard.ui.GuardActivity" />
-        </com.android.settings.widget.HomepagePreference>
+            android:fragment="com.crdroid.settings.crDroidSettingsLayout"
+            android:icon="@drawable/ic_homepage_crdroid"
+            android:key="top_level_crdroid"
+            android:title="@string/crdroid_settings_title"
+            android:summary="@string/ichthys_hub_summary"
+            settings:controller="com.crdroid.settings.TopLevelSettingsPreferenceController"/>
     </com.android.settingslib.widget.UntitledPreferenceCategory>
 
     <com.android.settingslib.widget.UntitledPreferenceCategory
@@ -185,17 +177,6 @@
             android:summary="@string/summary_placeholder"
             settings:highlightableMenuKey="@string/menu_key_about_device"
             settings:controller="com.android.settings.deviceinfo.aboutphone.TopLevelAboutDevicePreferenceController"/>
-
-        <!-- IchthysOS Shoal: the IchthysOS entry sits with battery and system. -->
-        <!-- Custom Options: crDroidSettings homepage entry (expressive theme). -->
-        <com.android.settings.widget.HomepagePreference
-            android:fragment="com.crdroid.settings.crDroidSettingsLayout"
-            android:icon="@drawable/ic_homepage_crdroid"
-            android:key="top_level_crdroid"
-            android:order="-25"
-            android:title="@string/crdroid_settings_title"
-            android:summary="@string/crdroid_settings_summary"
-            settings:controller="com.crdroid.settings.TopLevelSettingsPreferenceController"/>
     </com.android.settingslib.widget.UntitledPreferenceCategory>
 
     <com.android.settingslib.widget.UntitledPreferenceCategory

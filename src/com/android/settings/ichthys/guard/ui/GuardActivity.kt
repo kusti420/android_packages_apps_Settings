@@ -16,6 +16,7 @@
 
 package com.android.settings.ichthys.guard.ui
 
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -47,24 +48,28 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.android.settings.R
+import com.android.settings.ichthys.guard.data.GuardRepository
 import com.android.settings.ichthys.guard.notify.GuardNotifications
 import com.android.settings.ichthys.guard.ui.theme.Guard
 import com.android.settings.ichthys.guard.ui.theme.GuardTheme
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 enum class GuardTab(val label: String, val glyph: String) {
     HOME("Home", "◉"),
     APPS("Apps", "▦"),
     ACTIVITY("Activity", "≋"),
-    TRAFFIC("Traffic", "⇅"),
     RULES("Rules", "≡"),
 }
 
 /**
  * Settings' Guard page: the per-app firewall and activity monitor (formerly the standalone
- * org.ichthys.guard app). Opened from the "Guard" row on the Settings homepage, from Guard's
- * notifications and from a long-press on the Lockdown / Pause tiles.
+ * org.ichthys.guard app). Opened from the "Guard" row on the Settings homepage, from the Guard
+ * row of an app's App info page ([appIntent]), from Guard's notifications and from a long-press
+ * on the Lockdown / Pause tiles.
  *
  * Intents: an explicit launch from Settings itself, optionally with
  * [GuardNotifications.EXTRA_OPEN_PACKAGE] or [Intent.EXTRA_PACKAGE_NAME] to open one app's page.
@@ -83,16 +88,25 @@ class GuardActivity : ComponentActivity() {
                 val t = Guard.tokens
                 val vm: GuardViewModel = viewModel()
                 var tab by rememberSaveable { mutableStateOf(GuardTab.HOME) }
-                var detail by rememberSaveable { mutableStateOf<String?>(null) }
+                // Pages opened on top of the tabs, newest last: "a:<package>" (an app's page),
+                // "h:<destination>" or "s:automation". Back walks the stack, so app →
+                // destination → app works.
+                var stack by rememberSaveable { mutableStateOf("") }
+                val pages = if (stack.isEmpty()) emptyList() else stack.split('\n')
+                val push: (String) -> Unit = { page ->
+                    if (pages.lastOrNull() != page) stack = (pages + page).joinToString("\n")
+                }
+                val pop: () -> Unit = { stack = pages.dropLast(1).joinToString("\n") }
                 openPackage.value?.let {
-                    detail = it
+                    stack = "a:$it"
                     openPackage.value = null
                 }
-                BackHandler(enabled = detail != null) { detail = null }
-                BackHandler(enabled = detail == null && tab != GuardTab.HOME) {
+                BackHandler(enabled = pages.isNotEmpty()) { pop() }
+                BackHandler(enabled = pages.isEmpty() && tab != GuardTab.HOME) {
                     tab = GuardTab.HOME
                 }
-                val open: (String) -> Unit = { detail = it }
+                val open: (String) -> Unit = { push("a:$it") }
+                val openHost: (String) -> Unit = { push("h:$it") }
                 Scaffold(
                     containerColor = t.ink,
                     contentColor = t.text,
@@ -133,10 +147,10 @@ class GuardActivity : ComponentActivity() {
                                     )
                                 for (item in GuardTab.entries) {
                                     NavigationBarItem(
-                                        selected = tab == item && detail == null,
+                                        selected = tab == item && pages.isEmpty(),
                                         onClick = {
                                             tab = item
-                                            detail = null
+                                            stack = ""
                                         },
                                         icon = { Text(item.glyph) },
                                         label = { Text(item.label) },
@@ -148,9 +162,25 @@ class GuardActivity : ComponentActivity() {
                     },
                 ) { padding ->
                     val m = Modifier.padding(padding)
-                    val d = detail
-                    if (d != null) {
-                        AppDetailScreen(vm, d, onBack = { detail = null }, modifier = m)
+                    val top = pages.lastOrNull()
+                    if (top == PAGE_AUTOMATION) {
+                        AutomationScreen(vm, onOpenApp = open, onBack = pop, modifier = m)
+                    } else if (top != null && top.startsWith("h:")) {
+                        DestinationScreen(
+                            vm,
+                            top.removePrefix("h:"),
+                            onOpenApp = open,
+                            onBack = pop,
+                            modifier = m,
+                        )
+                    } else if (top != null) {
+                        AppDetailScreen(
+                            vm,
+                            top.removePrefix("a:"),
+                            onBack = pop,
+                            onOpenHost = openHost,
+                            modifier = m,
+                        )
                     } else {
                         when (tab) {
                             GuardTab.HOME ->
@@ -161,9 +191,9 @@ class GuardActivity : ComponentActivity() {
                                     modifier = m,
                                 )
                             GuardTab.APPS -> AppsScreen(vm, open, m)
-                            GuardTab.ACTIVITY -> ActivityScreen(vm, open, m)
-                            GuardTab.TRAFFIC -> TrafficScreen(vm, open, m)
-                            GuardTab.RULES -> RulesScreen(vm, m)
+                            GuardTab.ACTIVITY -> ActivityScreen(vm, open, openHost, m)
+                            GuardTab.RULES ->
+                                RulesScreen(vm, m, onOpenAutomation = { push(PAGE_AUTOMATION) })
                         }
                     }
                 }
@@ -171,9 +201,28 @@ class GuardActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        // The SystemUI Pause tile talks to the service directly; pick up its deadline. On a cold
+        // start this is the first get(), which builds the repository (it reads Guard's stores
+        // from disk), so not on the main thread.
+        val app = applicationContext
+        lifecycleScope.launch(Dispatchers.IO) { GuardRepository.get(app).refreshPause() }
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         handleIntent(intent)
+    }
+
+    companion object {
+        private const val PAGE_AUTOMATION = "s:automation"
+
+        /** Opens Guard at [packageName]'s page (the stock App info page's Guard row). */
+        @JvmStatic
+        fun appIntent(context: Context, packageName: String): Intent =
+            Intent(context, GuardActivity::class.java)
+                .putExtra(Intent.EXTRA_PACKAGE_NAME, packageName)
     }
 
     private fun handleIntent(intent: Intent?) {

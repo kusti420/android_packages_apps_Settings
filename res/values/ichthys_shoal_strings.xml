@@ -30,15 +30,42 @@
     <string name="lockscreen_scramble_pin_layout_title">Scramble PIN layout</string>
     <string name="lockscreen_scramble_pin_layout_summary">Shuffle the number keys every time the PIN pad appears</string>
 
-    <!-- Gallery clean-up (Settings > Storage and Guard): hides clutter from gallery apps with .nomedia markers -->
+    <!-- Gallery clean-up (Settings > Storage and Guard): hides clutter from gallery apps with .nomedia markers and MediaProvider filters -->
     <string name="ichthys_gallery_cleanup_title">Gallery clean-up</string>
-    <string name="ichthys_gallery_cleanup_summary">Keep app caches, stickers and cover art out of your gallery</string>
+    <string name="ichthys_gallery_cleanup_summary">Keep app caches, stickers, cover art and icons out of your gallery</string>
     <string name="ichthys_gallery_hide_app_media_title">App caches &amp; thumbnails</string>
     <string name="ichthys_gallery_hide_app_media_summary">Hide the media folders apps keep under Android/media (messengers are left to the next switch)</string>
     <string name="ichthys_gallery_hide_stickers_title">Messenger stickers &amp; GIFs</string>
     <string name="ichthys_gallery_hide_stickers_summary">Hide sticker and animated GIF folders; received photos stay visible</string>
-    <string name="ichthys_gallery_hide_art_caches_title">Album art caches</string>
-    <string name="ichthys_gallery_hide_art_caches_summary">Hide folders that hold only cover art, such as music players\' art caches</string>
+    <string name="ichthys_gallery_hide_art_caches_title">Album art</string>
+    <string name="ichthys_gallery_hide_art_caches_summary">Hide cover art stored next to your music, and folders that hold only cover art, such as music players\' art caches. The songs stay visible</string>
+    <string name="ichthys_gallery_hide_tiny_title">Tiny images</string>
+    <string name="ichthys_gallery_hide_tiny_summary">Hide images of 128×128 pixels or smaller, such as icons and favicons</string>
     <string name="ichthys_gallery_folders_title">Hidden folders</string>
-    <string name="ichthys_gallery_cleanup_footer">Folders are hidden with a .nomedia file; nothing is moved or deleted. Turn a folder off to always show it. Cover art stored next to your music stays visible, since hiding it would hide the songs too.</string>
+    <string name="ichthys_gallery_cleanup_footer">Nothing is moved or deleted. Folders are hidden with a .nomedia file; turn a folder off to always show it. Tiny images and cover art next to your music are only left out of gallery views, so file managers still show them.</string>
+
+    <!-- Accessibility scoping (Guard decision 36): per accessibility service, which apps it may see -->
+    <string name="ichthys_a11y_scope_title">App access</string>
+    <string name="ichthys_a11y_scope_summary">Choose which apps this service can read</string>
+    <string name="ichthys_a11y_scope_purpose">Opens the list of apps whose screens and events this accessibility service may see.</string>
+    <string name="ichthys_a11y_scope_intro_third_party"><xliff:g id="service">%1$s</xliff:g> can read the screen and events of the apps switched on below. Settings, the lock screen, password managers and banking apps are off by default.</string>
+    <string name="ichthys_a11y_scope_intro_system"><xliff:g id="service">%1$s</xliff:g> is part of the system and can read every app by default. Switch an app off to hide it from this service.</string>
+    <string name="ichthys_a11y_scope_reset">Reset to defaults</string>
+    <string name="ichthys_a11y_scope_apps">Apps this service can see</string>
+    <string name="ichthys_a11y_scope_lock_screen">Lock screen &amp; unlock screens</string>
+    <string name="ichthys_a11y_scope_reason_settings">Off by default: system settings</string>
+    <string name="ichthys_a11y_scope_reason_lock_screen">Off by default: PIN, pattern and password screens</string>
+    <string name="ichthys_a11y_scope_reason_passwords">Off by default: passwords and sign-in codes</string>
+    <string name="ichthys_a11y_scope_reason_banking">Off by default: banking or payments</string>
+
+    <!-- Usage access (Guard decision 34): the "Hide usage history" switch uses the
+         ichthys_shield_usage_* strings it shares with Guard (ichthys_guard_strings.xml). -->
+
+    <!-- No location (Guard decision 10): the app keeps its permission but never gets a fix -->
+    <string name="ichthys_location_nofix_title">No location</string>
+    <string name="ichthys_location_nofix_intro">Apps switched on here keep their location permission, but never get a location, as if the phone were indoors without signal. Tap an app to set precise location or allow only while in use.</string>
+    <string name="ichthys_location_nofix_apps">Apps that use location</string>
+    <!-- The on/off summaries are ichthys_shield_location_*, shared with Guard
+         (ichthys_guard_strings.xml). -->
+    <string name="ichthys_location_nofix_not_granted">Location permission not granted</string>
 </resources>

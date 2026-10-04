@@ -126,7 +126,20 @@ enum class AdviceReason {
 data class AdviceLine(val topic: AdviceTopic, val reason: AdviceReason)
 
 /** The recommended policy plus one reason line per topic, in display order. */
-data class Recommendation(val policy: AppPolicy, val lines: List<AdviceLine>)
+data class Recommendation(val policy: AppPolicy, val lines: List<AdviceLine>) {
+    /**
+     * The recommendation applied on top of a policy the user already built (an app paused by
+     * auto-tighten, back for review): network and tracker blocking become at least as strict as
+     * recommended, [AppPolicy.dormant] is cleared, and everything else the user set stays (host
+     * rules, tags, keepActive, the contacts and other exceptions, network behaviour).
+     */
+    fun mergedInto(existing: AppPolicy): AppPolicy =
+        existing.copy(
+            network = maxOf(existing.network, policy.network),
+            trackerBlock = maxOf(existing.trackerBlock, policy.trackerBlock),
+            dormant = false,
+        )
+}
 
 /**
  * The first-launch recommendation (W8b decision 16), small and rule-based for now: only the

@@ -36,6 +36,12 @@
         android:title="@string/ichthys_gallery_hide_art_caches_title"
         android:summary="@string/ichthys_gallery_hide_art_caches_summary" />
 
+    <SwitchPreferenceCompat
+        android:key="ichthys_gallery_hide_tiny"
+        android:persistent="false"
+        android:title="@string/ichthys_gallery_hide_tiny_title"
+        android:summary="@string/ichthys_gallery_hide_tiny_summary" />
+
     <PreferenceCategory
         android:key="ichthys_gallery_folders"
         android:title="@string/ichthys_gallery_folders_title" />

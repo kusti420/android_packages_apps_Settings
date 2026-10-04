@@ -35,14 +35,6 @@ data class PolicySet(val policies: Map<String, AppPolicy> = emptyMap()) {
     fun update(packageName: String, change: (AppPolicy) -> AppPolicy): PolicySet =
         with(change(policyFor(packageName)))
 
-    /**
-     * Values of the OS allowlist settings, in the format the platform parses (see OsSettingKey).
-     */
-    fun osSettingValues(): Map<OsSettingKey, String> =
-        OsSettingKey.entries.associateWith { key ->
-            policies.values.filter(key.selector).map { it.packageName }.sorted().joinToString(",")
-        }
-
     fun toJson(): String = json.encodeToString(serializer(), this)
 
     companion object {
@@ -62,28 +54,36 @@ enum class SettingsTable {
 }
 
 /**
- * The Build 2 OS hooks Guard drives: comma-separated package lists, no spaces, parsed with
- * String.split(","). Secure ones are per user. See docs/ARCHITECTURE.md "Integration contract".
+ * The per-user OS package lists Guard mirrors in [AppPolicy]: comma-separated, no spaces, parsed
+ * by the platform with String.split(","). A listed package is exempt from that shield (it gets
+ * real access). The setting is the source of truth: other writers (the permission dialog, the
+ * config service) edit the same keys, so Guard only ever adds or removes one package
+ * (OsSettingsBridge.setListed) and mirrors the list back into its policies
+ * (GuardRepository.syncOsListsFromSettings). It never rewrites a whole key.
  */
 enum class OsSettingKey(
     val key: String,
-    val table: SettingsTable,
+    /** Whether [AppPolicy] says the app is listed. */
     val selector: (AppPolicy) -> Boolean,
-    /** Implemented in Guard phase 1; the others are written once their OS side has landed. */
-    val writtenByGuard: Boolean,
+    /** The policy with the app listed or not. */
+    val assign: (AppPolicy, Boolean) -> AppPolicy,
 ) {
-    CONTACTS("ichthys_contacts_allowed_pkgs", SettingsTable.SECURE, { it.contactsAllowed }, true),
+    /** Read by ContactsProvider. A bare entry is real contacts; "pkg:picked" is not. */
+    CONTACTS(
+        "ichthys_contacts_allowed_pkgs",
+        { it.contactsAllowed },
+        { p, on -> p.copy(contactsAllowed = on) },
+    ),
+    /** Read by ClipboardService. */
     CLIPBOARD(
         "ichthys_clipboard_allowed_pkgs",
-        SettingsTable.SECURE,
         { it.clipboardAllowed },
-        true,
+        { p, on -> p.copy(clipboardAllowed = on) },
     ),
-    SENSORS("ichthys_sensor_exempt_pkgs", SettingsTable.SECURE, { it.sensorsExempt }, false),
-    UNRESTRICTED_BG(
-        "ichthys_unrestricted_bg_pkgs",
-        SettingsTable.GLOBAL,
-        { it.unrestrictedBackground },
-        false,
+    /** Read by SensorService, which pushes it to the native sensor service. */
+    SENSORS(
+        "ichthys_sensor_exempt_pkgs",
+        { it.sensorsExempt },
+        { p, on -> p.copy(sensorsExempt = on) },
     ),
 }

@@ -21,6 +21,18 @@
     <string name="ichthys_guard_summary">Per-app firewall, trackers and live network activity</string>
     <string name="ichthys_guard_navigate_up">Navigate up</string>
 
+    <!-- The Guard row on the stock App info page: opens that app's Guard page. -->
+    <string name="ichthys_guard_app_info_summary">Network, trackers and data access</string>
+
+    <!-- Per-app shields that are shown both in Guard's Data access card and on a stock page (the
+         Usage access page, the No location page). Both read these, so the wording can't drift.
+         One polarity everywhere: switch on = protected. -->
+    <string name="ichthys_shield_usage_title">Hide usage history</string>
+    <string name="ichthys_shield_usage_on">Sees an empty usage history</string>
+    <string name="ichthys_shield_usage_off">Sees which apps you used and when</string>
+    <string name="ichthys_shield_location_on">Never gets a location, as if indoors</string>
+    <string name="ichthys_shield_location_off">Gets your location when allowed</string>
+
     <!-- Notification channels -->
     <string name="ichthys_guard_channel_alerts">Guard alerts</string>
     <string name="ichthys_guard_channel_alerts_summary">New apps: what they embed, with one-tap network and tracker controls</string>
@@ -66,13 +78,13 @@
     <!-- Recommendation lines: topic, chosen value, one-line reason -->
     <string name="ichthys_guard_advice_topic_network">Network</string>
     <string name="ichthys_guard_advice_topic_trackers">Trackers</string>
-    <string name="ichthys_guard_advice_topic_exceptions">Privacy exceptions</string>
+    <string name="ichthys_guard_advice_topic_exceptions">Data access</string>
     <string name="ichthys_guard_advice_value_network_open">Open, monitored</string>
     <string name="ichthys_guard_advice_value_network_unused">Not requested</string>
     <string name="ichthys_guard_advice_value_trackers_strict">Strict</string>
     <string name="ichthys_guard_advice_value_trackers_known">Block known trackers</string>
     <string name="ichthys_guard_advice_value_trackers_off">Off</string>
-    <string name="ichthys_guard_advice_value_exceptions_closed">Closed</string>
+    <string name="ichthys_guard_advice_value_exceptions_closed">Protected</string>
     <string name="ichthys_guard_advice_network_shielded">Shielded default: connections allowed, every one monitored.</string>
     <string name="ichthys_guard_advice_network_not_requested">It doesn\'t ask for internet access, so there is nothing to restrict.</string>
     <string name="ichthys_guard_advice_trackers_strict">Several trackers found: only hosts you allow are reachable.</string>
@@ -80,7 +92,7 @@
     <string name="ichthys_guard_advice_trackers_browser">A browser: strict mode would break websites, so the default stays.</string>
     <string name="ichthys_guard_advice_trackers_none">None found; known tracker hosts stay blocked anyway.</string>
     <string name="ichthys_guard_advice_trackers_unknown">Scan not available yet, so the default stays.</string>
-    <string name="ichthys_guard_advice_exceptions_closed">Contacts, clipboard and sensors stay locked down until you allow them.</string>
+    <string name="ichthys_guard_advice_exceptions_closed">Contacts, clipboard and sensors stay protected until you give it real access.</string>
 
     <!-- First-launch buttons -->
     <string name="ichthys_guard_first_launch_apply">Apply recommended</string>

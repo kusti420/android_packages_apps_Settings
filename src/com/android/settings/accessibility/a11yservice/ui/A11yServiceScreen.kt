@@ -42,6 +42,7 @@ import com.android.settings.accessibility.extensions.putComponentName
 import com.android.settings.accessibility.shared.ui.FeedbackButtonPreference
 import com.android.settings.accessibility.shared.ui.LaunchAppInfoPreference
 import com.android.settings.core.PreferenceScreenMixin
+import com.android.settings.ichthys.protect.A11yScopePreference
 import com.android.settings.overlay.FeatureFactory.Companion.featureFactory
 import com.android.settings.utils.highlightPreference
 import com.android.settingslib.RestrictedPreference
@@ -218,6 +219,8 @@ private constructor(
                 {
                     +A11yServiceShortcutPreference(context, serviceInfo, metricsCategory)
                     +A11yServiceSettingPreference(serviceInfo)
+                    // IchthysOS: which apps this service may see (Guard decision 36).
+                    +A11yScopePreference(serviceInfo)
                     +LaunchAppInfoPreference(
                         key = "accessibility_service_app_info",
                         purpose = R.string.accessibility_service_app_info_purpose,

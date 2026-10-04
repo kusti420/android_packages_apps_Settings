@@ -115,6 +115,19 @@ class ServiceBackend : GuardBackend {
 
     override fun getPausedUntil(): Long = call(0L) { it.pausedUntil }
 
+    override fun replaceBehaviours(flags: Map<Int, Int>) =
+        call(Unit) {
+            val list = flags.filterValues { v -> v != 0 }.entries.toList()
+            it.replaceBehaviours(
+                IntArray(list.size) { i -> list[i].key },
+                IntArray(list.size) { i -> list[i].value },
+            )
+        }
+
+    override fun isLanDenied(uid: Int): Boolean = call(false) { it.isLanDenied(uid) }
+
+    override fun setAlertMask(mask: Int) = call(Unit) { it.setAlertMask(mask) }
+
     private inline fun <T> call(fallback: T, block: (IIchthysGuard) -> T): T {
         val s = service() ?: return fallback
         return try {

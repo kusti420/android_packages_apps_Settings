@@ -87,7 +87,7 @@
     <!-- IchthysOS Guard (com.android.settings.ichthys.guard): drives IchthysGuardService
          ("ichthys_guard"). Signature permission defined by the framework. -->
     <uses-permission android:name="org.ichthys.permission.MANAGE_ICHTHYS_GUARD" />
-    <!-- IchthysOS Guard: per-uid traffic (Traffic tab) and the permission usage timeline. -->
+    <!-- IchthysOS Guard: per-uid traffic (Activity tab) and the permission usage timeline. -->
     <uses-permission android:name="android.permission.READ_NETWORK_USAGE_HISTORY" />
     <uses-permission android:name="android.permission.GET_APP_OPS_STATS" />
     <!-- IchthysOS Guard is a per-app control panel: it has to see every installed app. -->
@@ -3577,18 +3577,9 @@
 
         <activity android:name=".development.AdbQrCodeActivity" />
 
-        <activity android:name="com.android.settings.development.DSULoader"
-                  android:label="Select DSU Package"
-                  android:theme="@android:style/Theme.DeviceDefault.Light.Dialog"
-                  android:exported="true" >
-            <intent-filter>
-                <action android:name="android.settings.development.START_DSU_LOADER"/>
-                <category android:name="android.intent.category.DEFAULT"/>
-            </intent-filter>
-        </activity>
-        <activity android:name=".development.DSUTermsOfServiceActivity"
-                  android:label="Terms of Service"
-                  android:theme="@android:style/Theme.DeviceDefault.Light.Dialog" />
+        <!-- IchthysOS: the DSU Loader activities (development.DSULoader and
+             development.DSUTermsOfServiceActivity) are not declared. Dynamic System Updates are
+             not shipped, so they could only start the missing com.android.dynsystem activity. -->
 
         <activity android:name=".development.storage.BlobInfoListView"
                   android:label="@string/shared_data_title" />
@@ -6287,7 +6278,7 @@
             </intent-filter>
         </activity>
 
-        <!-- IchthysOS gallery clean-up (Settings > Storage, Guard): re-applies .nomedia markers
+        <!-- IchthysOS gallery clean-up (Settings > Storage): re-applies .nomedia markers
              when images change, and re-arms after boot. -->
         <service
             android:name=".ichthys.gallery.GalleryCleanupJobService"
@@ -6303,10 +6294,41 @@
             </intent-filter>
         </receiver>
 
+        <!-- IchthysOS protect pages (Guard decisions 36 and 10). Not exported: Settings and
+             Guard (inside Settings) open them with IchthysProtect.a11yScopeIntent() and
+             IchthysProtect.noLocationIntent(). -->
+        <activity
+            android:name=".ichthys.protect.A11yScopeActivity"
+            android:exported="false"
+            android:label="@string/ichthys_a11y_scope_title"
+            android:theme="@style/Theme.SubSettings"
+            android:taskAffinity="com.android.settings.root">
+            <intent-filter>
+                <action android:name="org.ichthys.settings.action.ACCESSIBILITY_SCOPE" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <meta-data android:name="com.android.settings.FRAGMENT_CLASS"
+                android:value="com.android.settings.ichthys.protect.A11yScopeSettings" />
+        </activity>
+        <activity
+            android:name=".ichthys.protect.NoLocationActivity"
+            android:exported="false"
+            android:label="@string/ichthys_location_nofix_title"
+            android:theme="@style/Theme.SubSettings"
+            android:taskAffinity="com.android.settings.root">
+            <intent-filter>
+                <action android:name="org.ichthys.settings.action.NO_LOCATION" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <meta-data android:name="com.android.settings.FRAGMENT_CLASS"
+                android:value="com.android.settings.ichthys.protect.LocationNoFixSettings" />
+        </activity>
+
         <!-- IchthysOS Guard: per-app network firewall and activity monitor (formerly the
              org.ichthys.guard priv-app). Guard keeps its state in credential-protected storage,
              so none of its components is direct-boot aware. Only Settings' own explicit intents
-             (homepage row, notifications, QS long-press) open it. -->
+             (homepage row, the App info page's Guard row, notifications, QS long-press) open
+             it. -->
         <activity
             android:name=".ichthys.guard.ui.GuardActivity"
             android:label="@string/ichthys_guard_title"
@@ -6368,35 +6390,18 @@
             </intent-filter>
         </receiver>
 
-        <!-- IchthysOS Guard Quick Settings tiles: Lockdown panic switch and 5-minute pause.
-             Long-press goes through QSTileLongPressGatewayActivity to GuardActivity. Interim:
-             these become native SystemUI tiles later. -->
-        <service
-            android:name=".ichthys.guard.notify.LockdownTileService"
+        <!-- IchthysOS Guard: the native SystemUI Lockdown tile asks for and sets the lockdown state
+             here (an ordered broadcast; result code 1 = on, 0 = off). Lockdown state lives in
+             Guard's repository, not in IchthysGuardService. -->
+        <receiver
+            android:name=".ichthys.guard.notify.LockdownControlReceiver"
             android:exported="true"
             android:directBootAware="false"
-            android:icon="@drawable/ic_ichthys_guard_notify"
-            android:label="@string/ichthys_guard_tile_lockdown"
-            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            android:permission="org.ichthys.permission.MANAGE_ICHTHYS_GUARD">
             <intent-filter>
-                <action android:name="android.service.quicksettings.action.QS_TILE" />
+                <action android:name="com.android.settings.ichthys.guard.action.LOCKDOWN" />
             </intent-filter>
-            <meta-data android:name="android.service.quicksettings.TOGGLEABLE_TILE"
-                       android:value="true" />
-        </service>
-        <service
-            android:name=".ichthys.guard.notify.PauseTileService"
-            android:exported="true"
-            android:directBootAware="false"
-            android:icon="@drawable/ic_ichthys_guard_notify"
-            android:label="@string/ichthys_guard_tile_pause"
-            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
-            <intent-filter>
-                <action android:name="android.service.quicksettings.action.QS_TILE" />
-            </intent-filter>
-            <meta-data android:name="android.service.quicksettings.TOGGLEABLE_TILE"
-                       android:value="true" />
-        </service>
+        </receiver>
 
         <service
             android:name=".appfunctions.DeviceStateAppFunctionService"

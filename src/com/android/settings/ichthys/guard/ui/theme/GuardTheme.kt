@@ -105,6 +105,8 @@ fun guardTokens(context: Context): GuardTokens {
         accentTint = c(IR.color.ichthys_accent_tint),
         onAccent = c(IR.color.ichthys_on_accent),
         track = c(IR.color.ichthys_track),
+        // TODO: read a shared ichthys_danger token (frameworks/base ichthys_tokens.xml, from
+        // ichthys.nix) once it exists; system_error_* is the only colour here that isn't one.
         danger =
             c(if (night) android.R.color.system_error_dark else android.R.color.system_error_light),
         mono = FontFamily(ShoalStyle.mono(context, 400)),

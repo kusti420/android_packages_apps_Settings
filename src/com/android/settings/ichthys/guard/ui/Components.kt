@@ -16,7 +16,15 @@
 
 package com.android.settings.ichthys.guard.ui
 
+import android.database.ContentObserver
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.drawable.Drawable
+import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -27,6 +35,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
@@ -37,15 +46,28 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.android.settings.ichthys.guard.model.LabeledEvent
 import com.android.settings.ichthys.guard.ui.theme.Guard
 import java.text.DateFormat
 import java.util.Date
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * One group: the Shoal card on the ink ground. Outlined by a hairline with theme.surface =
@@ -156,6 +178,28 @@ fun ToggleRow(
         }
         Switch(checked = checked, onCheckedChange = onChange, enabled = enabled)
     }
+}
+
+/**
+ * A counter that goes up whenever one of the settings behind [uris] changes, on this page or
+ * anywhere else. Key the `remember` that reads those settings on it and the row follows the
+ * setting live. [uris] must be a stable list (a top-level value).
+ */
+@Composable
+fun rememberSettingsTick(uris: List<Uri>): Int {
+    val resolver = LocalContext.current.contentResolver
+    var tick by remember { mutableIntStateOf(0) }
+    DisposableEffect(resolver, uris) {
+        val observer =
+            object : ContentObserver(Handler(Looper.getMainLooper())) {
+                override fun onChange(selfChange: Boolean) {
+                    tick++
+                }
+            }
+        for (uri in uris) resolver.registerContentObserver(uri, false, observer)
+        onDispose { resolver.unregisterContentObserver(observer) }
+    }
+    return tick
 }
 
 /**
@@ -284,3 +328,44 @@ fun formatAgo(ms: Long, now: Long = System.currentTimeMillis()): String {
         else -> "${d / 86400} d ago"
     }
 }
+
+/** Keyed by package and pixel size: the same app is drawn at 28, 40 and 48 dp. */
+private val iconCache = android.util.LruCache<String, ImageBitmap>(160)
+
+/**
+ * The app's launcher icon, loaded off the main thread and cached. Draws nothing until loaded (and
+ * for packages without an icon), keeping the row's layout stable.
+ */
+@Composable
+fun AppIcon(packageName: String, modifier: Modifier = Modifier, size: Dp = 40.dp) {
+    val context = LocalContext.current
+    val px = with(LocalDensity.current) { size.roundToPx() }
+    val cacheKey = "$packageName@$px"
+    val icon by
+        produceState(iconCache.get(cacheKey), packageName, px) {
+            if (value == null) {
+                value =
+                    withContext(Dispatchers.IO) {
+                        runCatching {
+                                context.packageManager
+                                    .getApplicationIcon(packageName)
+                                    .toIconBitmap(px)
+                            }
+                            .getOrNull()
+                            ?.also { iconCache.put(cacheKey, it) }
+                    }
+            }
+        }
+    Box(modifier.size(size)) {
+        icon?.let { Image(it, contentDescription = null, modifier = Modifier.size(size)) }
+    }
+}
+
+private fun Drawable.toIconBitmap(px: Int): ImageBitmap {
+    val bmp = Bitmap.createBitmap(px, px, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bmp)
+    setBounds(0, 0, px, px)
+    draw(canvas)
+    return bmp.asImageBitmap()
+}
+

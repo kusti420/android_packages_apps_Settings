@@ -143,6 +143,39 @@ object Insights {
             .sortedByDescending { it.hits }
             .take(n)
 
+    /**
+     * One app's contact with a destination, for the destination page. [key] is what the rows are
+     * grouped by (the package, or "uid:N" for an unattributed uid), so it is unique in the list;
+     * [label] is not (two unattributed uids can share one).
+     */
+    data class DestinationApp(
+        val key: String,
+        val packageName: String?,
+        val label: String,
+        val hits: Int,
+        val blocked: Int,
+        val firstSeenMs: Long,
+        val lastSeenMs: Long,
+    )
+
+    /** Every app that looked up or connected to [destination], most active first. */
+    fun appsForDestination(events: List<LabeledEvent>, destination: String): List<DestinationApp> =
+        events
+            .filter { it.event.destination == destination }
+            .groupBy { it.packageName ?: "uid:${it.event.uid}" }
+            .map { (key, evs) ->
+                DestinationApp(
+                    key,
+                    evs.first().packageName,
+                    evs.first().appLabel,
+                    evs.size,
+                    evs.count { it.event.blocked },
+                    evs.minOf { it.event.timeMs },
+                    evs.maxOf { it.event.timeMs },
+                )
+            }
+            .sortedWith(compareByDescending<DestinationApp> { it.hits }.thenBy { it.label })
+
     /** Hosts in first-contact order for one app (the "first seen domains" list). */
     fun firstSeen(events: List<LabeledEvent>, packageName: String): List<Pair<String, Long>> =
         events
@@ -262,4 +295,6 @@ enum class AppFilter {
     BLOCKED,
     RECENTLY_ACTIVE,
     CUSTOMIZED,
+    /** Risk score at or above RiskScore.HIGH, riskiest first. */
+    HIGH_RISK,
 }

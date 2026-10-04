@@ -161,6 +161,7 @@ private fun AppInfoSettings(packageInfoPresenter: PackageInfoPresenter) {
             AppAllServicesPreference(app)
             AppNotificationPreference(app)
             AppPermissionPreference(app)
+            AppGuardPreference(app) // IchthysOS: this app's page in Guard
             ManageTargetAppFunctionAccessPreference(app)
             ManageAgentAppFunctionAccessPreference(app)
             AppStoragePreference(app)

@@ -41,7 +41,10 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.android.settings.ichthys.guard.model.AppFilter
 import com.android.settings.ichthys.guard.model.AppPolicy
+import com.android.settings.ichthys.guard.model.LocalNetwork
 import com.android.settings.ichthys.guard.model.NetworkAccess
+import com.android.settings.ichthys.guard.model.RiskScore
+import com.android.settings.ichthys.guard.model.RiskScorer
 import com.android.settings.ichthys.guard.model.TrackerBlockLevel
 import com.android.settings.ichthys.guard.ui.theme.Guard
 
@@ -52,6 +55,16 @@ fun AppsScreen(vm: GuardViewModel, onOpenApp: (String) -> Unit, modifier: Modifi
     val policies by vm.repo.policies.collectAsStateWithLifecycle()
     val byApp by vm.eventsByApp.collectAsStateWithLifecycle()
     val status by vm.status.collectAsStateWithLifecycle()
+    val riskFacts by vm.repo.riskFacts.collectAsStateWithLifecycle()
+    fun riskOf(pkg: String): RiskScore? =
+        riskFacts[pkg]?.let {
+            RiskScorer.score(
+                it,
+                policies.policyFor(pkg),
+                byApp[pkg].orEmpty(),
+                vm.repo.effectiveAccess(pkg),
+            )
+        }
     var query by rememberSaveable { mutableStateOf("") }
     var filter by rememberSaveable { mutableStateOf(AppFilter.ALL) }
     var showSystem by rememberSaveable { mutableStateOf(false) }
@@ -76,14 +89,18 @@ fun AppsScreen(vm: GuardViewModel, onOpenApp: (String) -> Unit, modifier: Modifi
                                 evs.any { it.event.blocked }
                         AppFilter.RECENTLY_ACTIVE -> evs.any { it.event.timeMs >= recentCutoff }
                         AppFilter.CUSTOMIZED -> !p.isDefault
+                        AppFilter.HIGH_RISK -> riskOf(a.packageName)?.isHigh == true
                     }
             }
             .let { list ->
-                if (filter == AppFilter.RECENTLY_ACTIVE)
-                    list.sortedByDescending {
-                        byApp[it.packageName]?.lastOrNull()?.event?.timeMs ?: 0
-                    }
-                else list
+                when (filter) {
+                    AppFilter.RECENTLY_ACTIVE ->
+                        list.sortedByDescending {
+                            byApp[it.packageName]?.lastOrNull()?.event?.timeMs ?: 0
+                        }
+                    AppFilter.HIGH_RISK -> list.sortedByDescending { riskOf(it.packageName)?.score }
+                    else -> list
+                }
             }
 
     LazyColumn(modifier) {
@@ -108,6 +125,9 @@ fun AppsScreen(vm: GuardViewModel, onOpenApp: (String) -> Unit, modifier: Modifi
                     Chip("Customized", filter == AppFilter.CUSTOMIZED) {
                         filter = AppFilter.CUSTOMIZED
                     }
+                    Chip("High risk", filter == AppFilter.HIGH_RISK) {
+                        filter = AppFilter.HIGH_RISK
+                    }
                     Chip("System apps", showSystem) { showSystem = !showSystem }
                 }
                 Text(
@@ -128,6 +148,7 @@ fun AppsScreen(vm: GuardViewModel, onOpenApp: (String) -> Unit, modifier: Modifi
                     .padding(horizontal = 16.dp, vertical = 12.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    AppIcon(app.packageName, Modifier.padding(end = 12.dp))
                     Text(
                         app.label,
                         style = MaterialTheme.typography.titleMedium,
@@ -142,6 +163,14 @@ fun AppsScreen(vm: GuardViewModel, onOpenApp: (String) -> Unit, modifier: Modifi
                     )
                         Tag("LOCKDOWN", danger = true)
                     if (trackerHosts > 0) Tag("$trackerHosts trackers", emphasized = true)
+                    if (policy.dormant) Tag("PAUSED", danger = true)
+                    riskOf(app.packageName)?.let { r ->
+                        Tag(
+                            "RISK ${r.score}",
+                            emphasized = r.score >= RiskScore.MEDIUM,
+                            danger = r.isHigh,
+                        )
+                    }
                 }
                 Text(
                     policySummary(policy),
@@ -180,10 +209,15 @@ fun policySummary(p: AppPolicy): String =
                         TrackerBlockLevel.STRICT -> "strict"
                     }
                 )
-                if (p.contactsAllowed) add("contacts")
-                if (p.clipboardAllowed) add("clipboard")
+                if (p.contactsAllowed) add("real contacts")
+                if (p.clipboardAllowed) add("clipboard at any time")
                 if (p.sensorsExempt) add("exact sensors")
-                if (p.unrestrictedBackground) add("unrestricted background")
+                if (p.screenOffBlock) add("offline when screen off")
+                if (p.backgroundNetworkOff) add("no background network")
+                if (p.localNetwork == LocalNetwork.ALLOW) add("local network")
+                if (p.localNetwork == LocalNetwork.BLOCK) add("no local network")
+                if (p.tags.isNotEmpty()) add(p.tags.joinToString("/") { it.label.lowercase() })
+                if (p.dormant) add("paused (unused)")
                 if (p.blockedHosts.isNotEmpty()) add("${p.blockedHosts.size} hosts blocked")
                 if (p.allowedHosts.isNotEmpty()) add("${p.allowedHosts.size} hosts allowed")
             }

@@ -32,7 +32,12 @@ import java.io.IOException
  * mechanism. Files are never moved or deleted; only `.nomedia` markers that carry [MARKER] are
  * ever created or removed, so markers placed by the user or by apps are left alone.
  *
- * Settings lives in Settings.Secure (shared by Settings → Storage and Guard). The markers placed
+ * Two cases can't use `.nomedia`, since it hides whole folders: tiny images ([KEY_HIDE_TINY]) and
+ * cover art sitting next to music (part of [Category.ART_CACHES]). MediaProvider reads the same
+ * Settings.Secure keys and filters those images out of gallery queries itself (IchthysMediaPolicy),
+ * re-notifying gallery apps when a switch changes, so no rescan is needed for them.
+ *
+ * Settings lives in Settings.Secure (edited in Settings → Storage). The markers placed
  * so far are remembered in Settings' own data dir, because a hidden folder disappears from
  * MediaStore and can't be found again by querying it.
  */
@@ -41,13 +46,23 @@ object GalleryCleanup {
 
     const val KEY_ALWAYS_SHOW = "ichthys_gallery_always_show"
 
-    enum class Category(val key: String) {
+    /**
+     * Images of 128×128 px or smaller; filtered by MediaProvider, no markers involved. On unless
+     * switched off (MediaProvider's IchthysMediaPolicy reads it with the same default).
+     */
+    const val KEY_HIDE_TINY = "ichthys_gallery_hide_tiny"
+
+    /** [defaultOn] is the state of a category whose key was never written. */
+    enum class Category(val key: String, val defaultOn: Boolean = false) {
         /** `Android/media/<pkg>`: app caches, previews and thumbnails (messengers excluded). */
         APP_MEDIA("ichthys_gallery_hide_app_media"),
         /** Messenger sticker and animated GIF folders; received photos stay visible. */
         STICKERS("ichthys_gallery_hide_stickers"),
-        /** Folders holding nothing but cover art (music players' art caches), no audio. */
-        ART_CACHES("ichthys_gallery_hide_art_caches"),
+        /**
+         * Folders holding nothing but cover art (music players' art caches), no audio. Cover art
+         * next to audio is hidden by MediaProvider under the same key, keeping the songs visible.
+         */
+        ART_CACHES("ichthys_gallery_hide_art_caches", defaultOn = true),
     }
 
     data class HiddenFolder(val relativePath: String, val category: Category)
@@ -78,14 +93,24 @@ object GalleryCleanup {
 
     private val lock = Any()
 
-    fun isEnabled(context: Context, category: Category): Boolean =
-        Settings.Secure.getInt(context.contentResolver, category.key, 0) != 0
+    fun isEnabled(context: Context, category: Category): Boolean {
+        val unset = if (category.defaultOn) 1 else 0
+        return Settings.Secure.getInt(context.contentResolver, category.key, unset) != 0
+    }
 
     fun setEnabled(context: Context, category: Category, enabled: Boolean) {
         Settings.Secure.putInt(context.contentResolver, category.key, if (enabled) 1 else 0)
     }
 
     fun anyEnabled(context: Context): Boolean = Category.values().any { isEnabled(context, it) }
+
+    fun isTinyHidden(context: Context): Boolean =
+        Settings.Secure.getInt(context.contentResolver, KEY_HIDE_TINY, 1) != 0
+
+    /** MediaProvider watches the key and tells gallery apps to query again. */
+    fun setTinyHidden(context: Context, hidden: Boolean) {
+        Settings.Secure.putInt(context.contentResolver, KEY_HIDE_TINY, if (hidden) 1 else 0)
+    }
 
     fun alwaysShow(context: Context): Set<String> =
         Settings.Secure.getString(context.contentResolver, KEY_ALWAYS_SHOW)

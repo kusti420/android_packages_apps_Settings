@@ -177,6 +177,10 @@ public class AppInfoDashboardFragment extends DashboardFragment
 
         use(AppPermissionPreferenceController.class).setParentFragment(this);
         use(AppPermissionPreferenceController.class).setPackageName(packageName);
+        // IchthysOS: the Guard row (this app's page in Guard).
+        use(AppGuardPreferenceController.class)
+                .setPackageName(packageName)
+                .setParentFragment(this);
         use(ManageAgentAppFunctionAccessPreferenceController.class).setParentFragment(this);
         use(ManageTargetAppFunctionAccessPreferenceController.class).setParentFragment(this);
         use(AppSettingPreferenceController.class)

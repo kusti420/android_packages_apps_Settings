@@ -40,6 +40,17 @@ enum class TrackerBlockLevel {
 }
 
 /**
+ * Local network access. DEFAULT: blocked for user apps installed after setup, stock for the rest
+ * (IchthysGuardService decides; it uses the stock ACCESS_LOCAL_NETWORK permission).
+ */
+@Serializable
+enum class LocalNetwork {
+    DEFAULT,
+    ALLOW,
+    BLOCK,
+}
+
+/**
  * Per-app policy. The defaults are the "Shielded" state every app starts in: network open, always
  * monitored, known trackers blocked, and every OS privacy exception closed.
  */
@@ -54,12 +65,22 @@ data class AppPolicy(
     val clipboardAllowed: Boolean = false,
     /** Exempt from sensor anti-fingerprinting (Settings.Secure ichthys_sensor_exempt_pkgs). */
     val sensorsExempt: Boolean = false,
-    /** Selected for "Unrestricted background" (Settings.Global ichthys_unrestricted_bg_pkgs). */
-    val unrestrictedBackground: Boolean = false,
     /** Hosts the user explicitly allowed for this app (STRICT mode / overriding a tracker hit). */
     val allowedHosts: Set<String> = emptySet(),
     /** Hosts the user explicitly blocked for this app. */
     val blockedHosts: Set<String> = emptySet(),
+    /** No network while the screen is off or locked (W8b decision 13). */
+    val screenOffBlock: Boolean = false,
+    /** Network only while the app is on screen (W8b decision 13). */
+    val backgroundNetworkOff: Boolean = false,
+    /** Local network (LAN) access; DEFAULT is the platform's choice (see [LocalNetwork]). */
+    val localNetwork: LocalNetwork = LocalNetwork.DEFAULT,
+    /** The user's tags; profiles match on them (Bedtime blocks SOCIAL and VIDEO). */
+    val tags: Set<AppTag> = emptySet(),
+    /** Auto-tightened after weeks unused: no network until the user reviews it again. */
+    val dormant: Boolean = false,
+    /** Never auto-tighten this app. */
+    val keepActive: Boolean = false,
 ) {
     /** True when nothing differs from the Shielded defaults (lets the store drop the entry). */
     val isDefault: Boolean
