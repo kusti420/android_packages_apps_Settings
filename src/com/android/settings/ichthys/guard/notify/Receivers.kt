@@ -19,6 +19,7 @@ package com.android.settings.ichthys.guard.notify
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.os.UserManager
 import com.android.settings.ichthys.guard.data.GuardRepository
 import com.android.settings.ichthys.guard.model.AlertType
 import com.android.settings.ichthys.guard.model.NetworkAccess
@@ -141,6 +142,12 @@ class BootReceiver : BroadcastReceiver() {
 class LockdownControlReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != ACTION_LOCKDOWN) return
+        // The rules are in credential-protected storage. Before the first unlock after a boot
+        // the tile already asks for its state; answer "off" instead of crashing on the storage.
+        if (context.getSystemService(UserManager::class.java)?.isUserUnlocked != true) {
+            if (isOrderedBroadcast) resultCode = 0
+            return
+        }
         val pending = goAsync()
         Thread {
                 try {
