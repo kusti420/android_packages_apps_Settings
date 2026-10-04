@@ -25,6 +25,21 @@
         android:summary="@string/bluetooth_screen_auto_on_summary"
         settings:controller="com.android.settings.bluetooth.BluetoothAutoOnPreferenceController"/>
 
+    <!-- IchthysOS: AirPods battery levels, read by SystemUI (IchthysPodBatteryController) from
+         the connected earbuds; the second switch allows nearby LE broadcasts as a fallback. -->
+    <SwitchPreferenceCompat
+        android:key="ichthys_airpods_battery"
+        android:title="@string/ichthys_airpods_battery_title"
+        android:summary="@string/ichthys_airpods_battery_summary"
+        settings:controller="com.android.settings.ichthys.AirPodsBatteryPreferenceController"/>
+
+    <SwitchPreferenceCompat
+        android:key="ichthys_airpods_battery_broadcast_fallback"
+        android:dependency="ichthys_airpods_battery"
+        android:title="@string/ichthys_airpods_battery_broadcast_fallback_title"
+        android:summary="@string/ichthys_airpods_battery_broadcast_fallback_summary"
+        settings:controller="com.android.settings.ichthys.AirPodsBroadcastFallbackPreferenceController"/>
+
     <Preference
         android:key="bluetooth_screen_bt_pair_rename_devices"
         android:title="@string/bluetooth_device_name"
