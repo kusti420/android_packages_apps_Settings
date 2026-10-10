@@ -352,7 +352,10 @@ public class WifiConfigController2 implements TextWatcher,
         mIpSettingsSpinner.setAdapter(getSpinnerAdapter(R.array.wifi_ip_settings));
         mIpSettingsSpinner.setOnItemSelectedListener(this);
         mProxySettingsSpinner = (Spinner) mView.findViewById(R.id.proxy_settings);
-        mProxySettingsSpinner.setAdapter(getSpinnerAdapter(R.array.wifi_proxy_settings));
+        // IchthysOS: proxy auto-config needs PacProcessor, which is not shipped, so a PAC URL would
+        // do nothing. Offer "None" and "Manual" only; they keep positions 0 and 1.
+        mProxySettingsSpinner.setAdapter(getSpinnerAdapter(Arrays.copyOf(
+                mContext.getResources().getStringArray(R.array.wifi_proxy_settings), PROXY_PAC)));
         mProxySettingsSpinner.setOnItemSelectedListener(this);
         if (!mHideMeteredAndPrivacy) {
             mMeteredSettingsSpinner = mView.findViewById(R.id.metered_settings);
@@ -476,8 +479,8 @@ public class WifiConfigController2 implements TextWatcher,
                     mProxySettingsSpinner.setSelection(PROXY_STATIC);
                     showAdvancedFields = true;
                 } else if (proxySettings == ProxySettings.PAC) {
-                    mProxySettingsSpinner.setSelection(PROXY_PAC);
-                    showAdvancedFields = true;
+                    // IchthysOS: there is no PAC entry to select (see the adapter above).
+                    mProxySettingsSpinner.setSelection(PROXY_NONE);
                 } else {
                     mProxySettingsSpinner.setSelection(PROXY_NONE);
                 }
