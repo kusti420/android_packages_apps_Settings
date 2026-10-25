@@ -612,6 +612,10 @@ public abstract class SettingsPreferenceFragment extends InstrumentedPreferenceF
 
     @Override
     public void onDisplayPreferenceDialog(Preference preference) {
+        // IchthysOS (tracker#59): list settings with drawn previews pick from pictures.
+        if (com.crdroid.settings.preferences.OptionPreviews.show(preference)) {
+            return;
+        }
         if (preference.getKey() == null) {
             // Auto-key preferences that don't have a key, so the dialog can find them.
             preference.setKey(UUID.randomUUID().toString());

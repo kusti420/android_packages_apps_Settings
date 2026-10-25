@@ -128,6 +128,8 @@ android_library {
 
         // Custom Options: crDroidSettings support (lineage-sdk preference widgets).
         "LineagePreferenceLib",
+        // IchthysOS (tracker#59): Monet palettes for the palette-style previews.
+        "monet",
 
         // IchthysOS Guard (src/com/android/settings/ichthys/guard): JSON persistence of
         // policies, rules and stats. The IIchthysGuard AIDL comes from framework.jar
