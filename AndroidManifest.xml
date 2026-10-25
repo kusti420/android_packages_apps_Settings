@@ -6428,6 +6428,19 @@
 
         <!-- IchthysOS: DonateActivity and DonateReceiver removed — not used. -->
 
+        <!-- IchthysOS lock screen editor (tracker#58): looks, the clock moved / resized / turned
+             freely, depth. Exported for SystemUI's lock screen long-press "customize" button. -->
+        <activity android:name="com.crdroid.settings.fragments.lockscreen.LockscreenEditorActivity"
+                  android:label="@string/ichthys_editor_title"
+                  android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
+                  android:excludeFromRecents="true"
+                  android:exported="true">
+            <intent-filter>
+                <action android:name="org.ichthys.action.EDIT_LOCKSCREEN" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
         <!-- This is the longest AndroidManifest.xml ever. -->
 
     </application>
