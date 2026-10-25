@@ -6428,6 +6428,19 @@
 
         <!-- IchthysOS: DonateActivity and DonateReceiver removed — not used. -->
 
+        <!-- IchthysOS Backstage list (tracker#38), opened by long-pressing the Backstage tile. -->
+        <activity
+            android:name="Settings$BackstageActivity"
+            android:label="@string/backstage_title"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="org.ichthys.action.BACKSTAGE_SETTINGS" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <meta-data android:name="com.android.settings.FRAGMENT_CLASS"
+                       android:value="com.crdroid.settings.fragments.backstage.Backstage" />
+        </activity>
+
         <!-- IchthysOS lock screen editor (tracker#58): looks, the clock moved / resized / turned
              freely, depth. Exported for SystemUI's lock screen long-press "customize" button. -->
         <activity android:name="com.crdroid.settings.fragments.lockscreen.LockscreenEditorActivity"

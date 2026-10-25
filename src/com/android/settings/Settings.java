@@ -686,6 +686,8 @@ public class Settings extends SettingsActivity {
     public static class FlashNotificationsActivity extends SettingsActivity { /* empty */ }
     public static class NotificationBundlesActivity extends SettingsActivity { /* empty */ }
     public static class NotificationSummarizationActivity extends SettingsActivity { /* empty */ }
+    /** IchthysOS: the Backstage list, opened by long-pressing the Backstage tile. */
+    public static class BackstageActivity extends SettingsActivity { /* empty */ }
 
     /** Activity for Adaptive Connectivity Settings. */
     public static class AdaptiveConnectivitySettingsActivity extends CatalystSettingsActivity {
