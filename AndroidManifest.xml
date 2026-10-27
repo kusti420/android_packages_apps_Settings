@@ -6369,12 +6369,16 @@
             android:name=".ichthys.guard.notify.WeeklyReportReceiver"
             android:exported="false"
             android:directBootAware="false" />
+        <!-- IchthysOS: also the clock and time-zone changes (protected, exempt from the implicit
+             broadcast limits), which move every profile window. -->
         <receiver
             android:name=".ichthys.guard.notify.BootReceiver"
             android:exported="true"
             android:directBootAware="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
             </intent-filter>
         </receiver>
         <!-- Explicit broadcast from IchthysGuardService (system_server) after an install-time
@@ -6428,11 +6432,13 @@
 
         <!-- IchthysOS: DonateActivity and DonateReceiver removed — not used. -->
 
-        <!-- IchthysOS Backstage list (tracker#38), opened by long-pressing the Backstage tile. -->
+        <!-- IchthysOS Backstage list (tracker#38), opened by long-pressing the Backstage tile.
+             Only SystemUI's tile starts it, so only holders of STATUS_BAR_SERVICE may. -->
         <activity
             android:name="Settings$BackstageActivity"
             android:label="@string/backstage_title"
-            android:exported="true">
+            android:exported="true"
+            android:permission="android.permission.STATUS_BAR_SERVICE">
             <intent-filter>
                 <action android:name="org.ichthys.action.BACKSTAGE_SETTINGS" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -6441,11 +6447,12 @@
                        android:value="com.crdroid.settings.fragments.backstage.Backstage" />
         </activity>
 
-        <!-- IchthysOS lock screen editor (tracker#58): looks, the clock moved / resized / turned
-             freely, depth. Exported for SystemUI's lock screen long-press "customize" button. -->
-        <activity android:name="com.crdroid.settings.fragments.lockscreen.LockscreenEditorActivity"
+        <!-- IchthysOS lock screen editor v2 (tracker#58): One UI style live preview, tap to select,
+             move / resize / turn, clock sheet, depth (overlap / X-ray / shape), Ideas. Exported for
+             SystemUI's lock screen long-press "customize" button. -->
+        <activity android:name="com.crdroid.settings.fragments.lockscreen.editor2.LockscreenEditor2Activity"
                   android:label="@string/ichthys_editor_title"
-                  android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
+                  android:theme="@style/Theme.Ichthys.LockEditor"
                   android:excludeFromRecents="true"
                   android:exported="true">
             <intent-filter>

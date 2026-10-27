@@ -27,19 +27,21 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.UserManager
+import android.provider.Settings
 import android.util.Log
 import com.android.settings.R
 import com.android.settings.ichthys.guard.data.GuardRepository
 import com.android.settings.ichthys.guard.model.AlertType
+import com.android.settings.ichthys.guard.model.HostRules
 import com.android.settings.ichthys.guard.model.PeriodReport
 import com.android.settings.ichthys.guard.model.StatsHistory
 import com.android.settings.ichthys.guard.ui.GuardActivity
 import java.util.Calendar
 
 /**
- * Guard's notifications, posted by Settings: "new app installed" (with one-tap Block network /
- * Strict), the confirmations after those actions, and the weekly privacy report. Every notification
- * opens [GuardActivity].
+ * Guard's notifications, posted by Settings: "new app installed" (with one-tap Block network, and
+ * Strict once host rules are enforced), the confirmations after those actions, and the weekly
+ * privacy report. Every notification opens [GuardActivity].
  *
  * [init] runs when the Settings process starts (SettingsApplication) and again from the boot
  * receiver. It is idempotent and does nothing until the user is unlocked, because Guard's state
@@ -79,6 +81,8 @@ object GuardNotifications {
     private const val ALERT_ID_BASE = 0x2000000
     private const val PREFS = "ichthys_guard_notify"
     private const val KEY_CHANGED_SEQ = "changed_seq"
+    /** Settings.Global.BOOT_COUNT [KEY_CHANGED_SEQ] belongs to (the sequence restarts at boot). */
+    private const val KEY_CHANGED_BOOT = "changed_boot"
     /** Local hour of the daily maintenance alarm: a time the phone is normally idle. */
     private const val MAINTENANCE_HOUR = 4
 
@@ -87,6 +91,8 @@ object GuardNotifications {
     @JvmStatic
     fun init(context: Context) {
         val app = context.applicationContext
+        // IchthysOS: no Guard for secondary users and profiles (see GuardRepository.isGuardUser).
+        if (!GuardRepository.isGuardUser()) return
         if (!app.getSystemService(UserManager::class.java).isUserUnlocked) return
         synchronized(this) {
             if (initialized) return
@@ -186,12 +192,19 @@ object GuardNotifications {
     /**
      * Notifies about apps installed while Guard wasn't running. First run only records the
      * sequence.
+     *
+     * IchthysOS: PackageManager's change sequence restarts at 0 on every boot, so the stored one is
+     * only valid for the boot it was saved in (KEY_CHANGED_BOOT); from another boot, everything
+     * changed since this boot started is new. [markAnnounced] moves it on after a live notice, so
+     * the next process start doesn't announce the same app again.
      */
     private fun catchUp(ctx: Context) {
         try {
             val prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             val pm = ctx.packageManager
-            val last = prefs.getInt(KEY_CHANGED_SEQ, -1)
+            val boot = bootCount(ctx)
+            var last = prefs.getInt(KEY_CHANGED_SEQ, -1)
+            if (last >= 0 && prefs.getInt(KEY_CHANGED_BOOT, -1) != boot) last = 0
             val changed = pm.getChangedPackages(if (last < 0) 0 else last)
             if (changed != null) {
                 if (last >= 0) {
@@ -206,14 +219,39 @@ object GuardNotifications {
                         if (pi.firstInstallTime == pi.lastUpdateTime) notifyNewApp(ctx, pkg)
                     }
                 }
-                prefs.edit().putInt(KEY_CHANGED_SEQ, changed.sequenceNumber).apply()
-            } else if (last < 0) {
-                prefs.edit().putInt(KEY_CHANGED_SEQ, 0).apply()
+                prefs
+                    .edit()
+                    .putInt(KEY_CHANGED_SEQ, changed.sequenceNumber)
+                    .putInt(KEY_CHANGED_BOOT, boot)
+                    .apply()
+            } else if (last <= 0) {
+                prefs.edit().putInt(KEY_CHANGED_SEQ, 0).putInt(KEY_CHANGED_BOOT, boot).apply()
             }
         } catch (e: RuntimeException) {
             Log.w(TAG, "package catch-up failed", e)
         }
     }
+
+    /**
+     * IchthysOS: after a live new-app notice ([PackageAddedReceiver]), moves the stored sequence
+     * to now, so [catchUp] at the next process start doesn't announce the same install again.
+     * Every install while the process lives gets its own live broadcast, so nothing is skipped.
+     */
+    fun markAnnounced(ctx: Context) {
+        try {
+            val changed = ctx.packageManager.getChangedPackages(0) ?: return
+            ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .edit()
+                .putInt(KEY_CHANGED_SEQ, changed.sequenceNumber)
+                .putInt(KEY_CHANGED_BOOT, bootCount(ctx))
+                .apply()
+        } catch (e: RuntimeException) {
+            Log.w(TAG, "could not record the package sequence", e)
+        }
+    }
+
+    private fun bootCount(ctx: Context): Int =
+        Settings.Global.getInt(ctx.contentResolver, Settings.Global.BOOT_COUNT, -1)
 
     private fun canNotify(ctx: Context): Boolean =
         ctx.getSystemService(NotificationManager::class.java).areNotificationsEnabled()
@@ -273,13 +311,18 @@ object GuardNotifications {
                 "scan pending"
             }
         val title = "$label installed · $scanText · Shielded"
+        // IchthysOS: per-app tracker rules aren't enforced yet (HostRules), so the text doesn't
+        // claim blocks and the "Strict" button is left out until they are.
+        val trackerLine =
+            if (HostRules.ENFORCED) "Known trackers are blocked."
+            else "The system-wide blocklist stops common trackers."
         val body =
             if (trackers.isEmpty()) {
-                "Monitored, known trackers blocked, contacts and clipboard locked."
+                "Monitored, contacts and clipboard locked. $trackerLine"
             } else {
-                "Embeds: ${trackers.joinToString()}. Known trackers are blocked."
+                "Embeds: ${trackers.joinToString()}. $trackerLine"
             }
-        val n =
+        val builder =
             Notification.Builder(ctx, CHANNEL_ALERTS)
                 .setSmallIcon(R.drawable.ic_ichthys_guard_notify)
                 .setContentTitle(title)
@@ -295,15 +338,13 @@ object GuardNotifications {
                         )
                         .build()
                 )
-                .addAction(
-                    Notification.Action.Builder(
-                            null,
-                            "Strict",
-                            actionIntent(ctx, ACTION_STRICT, pkg),
-                        )
-                        .build()
-                )
-                .build()
+        if (HostRules.ENFORCED) {
+            builder.addAction(
+                Notification.Action.Builder(null, "Strict", actionIntent(ctx, ACTION_STRICT, pkg))
+                    .build()
+            )
+        }
+        val n = builder.build()
         ctx.getSystemService(NotificationManager::class.java).notify(notificationId(pkg), n)
     }
 
@@ -377,6 +418,8 @@ object GuardNotifications {
     fun postWeeklyReport(ctx: Context) {
         if (!canNotify(ctx)) return
         val repo = GuardRepository.get(ctx)
+        // IchthysOS: a cold start (the alarm woke the process) counts the buffered events first.
+        repo.awaitBackfill()
         // Persisted per-day counters, so the report covers the full week even across reboots.
         val today = StatsHistory.epochDay(System.currentTimeMillis())
         val history = repo.stats.value
@@ -404,7 +447,9 @@ internal fun BroadcastReceiver.runAsync(block: () -> Unit) {
     Thread {
             try {
                 block()
-            } catch (e: RuntimeException) {
+            } catch (e: Exception) {
+                // IchthysOS: Exception, not only RuntimeException: an IOException (full disk) from
+                // the stores would otherwise kill the Settings process.
                 Log.w("IchthysGuard", "receiver work failed", e)
             } finally {
                 pending.finish()

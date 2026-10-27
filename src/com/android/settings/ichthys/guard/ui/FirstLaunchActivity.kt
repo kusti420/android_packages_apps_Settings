@@ -82,6 +82,7 @@ import com.android.settings.ichthys.guard.model.AdviceReason
 import com.android.settings.ichthys.guard.model.AdviceTopic
 import com.android.settings.ichthys.guard.model.AppFacts
 import com.android.settings.ichthys.guard.model.FirstLaunchAdvisor
+import com.android.settings.ichthys.guard.model.HostRules
 import com.android.settings.ichthys.guard.model.PermissionGroup
 import com.android.settings.ichthys.guard.model.Recommendation
 import com.android.settings.ichthys.guard.model.TrackerBlockLevel
@@ -139,12 +140,13 @@ class FirstLaunchActivity : ComponentActivity() {
             withContext(Dispatchers.IO) {
                 if (choice == SheetChoice.APPLY) {
                     // The same path the app page uses: store, OS allowlists and the service. A
-                    // new app has no policy yet, so the recommendation becomes it. One paused by
-                    // auto-tighten keeps what the user set up; only the recommendation is merged
-                    // in and the pause lifted.
+                    // new app has no policy yet, so the recommendation becomes it. IchthysOS: any
+                    // app with choices already (paused by auto-tighten, or blocked from the
+                    // new-app notification before it was opened) keeps what the user set up;
+                    // only the recommendation is merged in and a pause lifted.
                     sheet.repo.updatePolicy(pkg) { old ->
-                        if (old.dormant) sheet.recommendation.mergedInto(old)
-                        else sheet.recommendation.policy
+                        if (old.isDefault) sheet.recommendation.policy
+                        else sheet.recommendation.mergedInto(old)
                     }
                 }
                 // An app auto-tightened for being unused (also suspended by Settings) gets its
@@ -224,6 +226,8 @@ private class SheetData(
     val facts: AppFacts,
     val groups: List<PermissionGroup>,
     val recommendation: Recommendation,
+    /** Paused by auto-tighten (it has run before), not a new app. */
+    val dormant: Boolean,
 )
 
 private fun loadSheet(ctx: Context, pkg: String): SheetData? {
@@ -250,6 +254,7 @@ private fun loadSheet(ctx: Context, pkg: String): SheetData? {
         facts,
         PermissionGroup.of(requested),
         FirstLaunchAdvisor.recommend(facts),
+        repo.policies.value.policyFor(pkg).dormant,
     )
 }
 
@@ -389,8 +394,12 @@ private fun Header(s: SheetData?, pkg: String) {
             }
         }
     }
+    // IchthysOS: an app paused by auto-tighten has run before; don't call it new.
     Text(
-        stringResource(R.string.ichthys_guard_first_launch_intro),
+        stringResource(
+            if (s?.dormant == true) R.string.ichthys_guard_first_launch_intro_dormant
+            else R.string.ichthys_guard_first_launch_intro
+        ),
         style = MaterialTheme.typography.bodyMedium,
         color = t.muted,
     )
@@ -539,13 +548,16 @@ private fun AdviceLine.valueRes(rec: Recommendation): Int =
             if (reason == AdviceReason.NETWORK_NOT_REQUESTED)
                 R.string.ichthys_guard_advice_value_network_unused
             else R.string.ichthys_guard_advice_value_network_open
+        // IchthysOS: per-app tracker levels aren't enforced yet (HostRules).
         AdviceTopic.TRACKERS ->
-            when (rec.policy.trackerBlock) {
-                TrackerBlockLevel.STRICT -> R.string.ichthys_guard_advice_value_trackers_strict
-                TrackerBlockLevel.KNOWN_TRACKERS ->
-                    R.string.ichthys_guard_advice_value_trackers_known
-                TrackerBlockLevel.OFF -> R.string.ichthys_guard_advice_value_trackers_off
-            }
+            if (!HostRules.ENFORCED) R.string.ichthys_guard_advice_value_trackers_not_enforced
+            else
+                when (rec.policy.trackerBlock) {
+                    TrackerBlockLevel.STRICT -> R.string.ichthys_guard_advice_value_trackers_strict
+                    TrackerBlockLevel.KNOWN_TRACKERS ->
+                        R.string.ichthys_guard_advice_value_trackers_known
+                    TrackerBlockLevel.OFF -> R.string.ichthys_guard_advice_value_trackers_off
+                }
         AdviceTopic.EXCEPTIONS -> R.string.ichthys_guard_advice_value_exceptions_closed
     }
 

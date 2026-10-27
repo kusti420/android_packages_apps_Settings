@@ -65,6 +65,7 @@ import com.android.settings.ichthys.guard.data.GuardRepository
 import com.android.settings.ichthys.guard.model.ActivityFilter
 import com.android.settings.ichthys.guard.model.EventType
 import com.android.settings.ichthys.guard.model.Grouping
+import com.android.settings.ichthys.guard.model.HostRules
 import com.android.settings.ichthys.guard.model.Insights
 import com.android.settings.ichthys.guard.model.LabeledEvent
 import com.android.settings.ichthys.guard.model.RuleEngine
@@ -461,6 +462,16 @@ private fun EventActions(
             style = MaterialTheme.typography.bodySmall,
             color = t.muted,
         )
+        // IchthysOS: what happened to this event comes from the event itself (the firewall or the
+        // hosts file); the verdict line explains what the current rules would do.
+        if (e.event.blocked) {
+            Text(
+                "This one was blocked",
+                style = MaterialTheme.typography.bodyMedium,
+                color = t.danger,
+                modifier = Modifier.padding(top = 12.dp),
+            )
+        }
         Text(
             verdictText(verdict, tracker?.name),
             style = MaterialTheme.typography.bodyMedium,
@@ -472,23 +483,26 @@ private fun EventActions(
                 dismiss()
                 onOpenHost(e.event.destination)
             }
-            if (pkg != null) {
-                ActionRow("Block host for ${e.appLabel}") {
-                    repo.blockHost(pkg, host)
+            // IchthysOS: host rules aren't enforced yet (HostRules), so don't offer to make them.
+            if (HostRules.ENFORCED) {
+                if (pkg != null) {
+                    ActionRow("Block host for ${e.appLabel}") {
+                        repo.blockHost(pkg, host)
+                        dismiss()
+                    }
+                    ActionRow("Allow for ${e.appLabel}") {
+                        repo.allowHost(pkg, host)
+                        dismiss()
+                    }
+                }
+                ActionRow("Block everywhere") {
+                    repo.blockHost(null, host)
                     dismiss()
                 }
-                ActionRow("Allow for ${e.appLabel}") {
-                    repo.allowHost(pkg, host)
+                ActionRow("Allow everywhere") {
+                    repo.allowHost(null, host)
                     dismiss()
                 }
-            }
-            ActionRow("Block everywhere") {
-                repo.blockHost(null, host)
-                dismiss()
-            }
-            ActionRow("Allow everywhere") {
-                repo.allowHost(null, host)
-                dismiss()
             }
             ActionRow("Copy host") {
                 context
@@ -516,9 +530,17 @@ private fun ActionRow(label: String, onClick: () -> Unit) {
     )
 }
 
-/** Human explanation of a [Verdict] ("Would be blocked: known tracker (Google AdMob)"). */
+/**
+ * Human explanation of a [Verdict] ("Would be blocked: this app has no network access"). A rule
+ * that isn't enforced yet ([Verdict.notEnforced]) is named, but never as a block.
+ */
 fun verdictText(v: Verdict, trackerName: String?): String {
-    val head = if (v.blocked) "Would be blocked" else "Allowed"
+    val head =
+        when {
+            v.blocked -> "Would be blocked"
+            v.notEnforced -> "Not blocked (host rules aren't enforced yet)"
+            else -> "Allowed"
+        }
     val why =
         when (v.source) {
             VerdictSource.PAUSED -> "protection is paused"
@@ -532,7 +554,8 @@ fun verdictText(v: Verdict, trackerName: String?): String {
             VerdictSource.TRACKER -> "known tracker" + (trackerName?.let { " ($it)" } ?: "")
             VerdictSource.STRICT -> "strict mode allows only listed hosts"
             VerdictSource.DEFAULT ->
-                if (trackerName != null) "tracker blocking is off for this app ($trackerName)"
+                if (trackerName != null && HostRules.ENFORCED)
+                    "tracker blocking is off for this app ($trackerName)"
                 else "no rule matches"
         }
     return "$head: $why"

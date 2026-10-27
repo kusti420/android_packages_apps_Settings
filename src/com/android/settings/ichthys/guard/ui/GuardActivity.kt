@@ -19,6 +19,7 @@ package com.android.settings.ichthys.guard.ui
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -80,6 +81,13 @@ class GuardActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        // IchthysOS: Guard's firewall table is device-wide and belongs to the system user; another
+        // user's or profile's Guard would replace the owner's rules (GuardRepository.isGuardUser).
+        if (!GuardRepository.isGuardUser()) {
+            Toast.makeText(this, R.string.ichthys_guard_owner_only, Toast.LENGTH_LONG).show()
+            finish()
+            return
+        }
         handleIntent(intent)
         // Settings' Application starts this lazily; make sure channels and the weekly alarm exist.
         GuardNotifications.init(this)
@@ -203,6 +211,7 @@ class GuardActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        if (!GuardRepository.isGuardUser()) return
         // The SystemUI Pause tile talks to the service directly; pick up its deadline. On a cold
         // start this is the first get(), which builds the repository (it reads Guard's stores
         // from disk), so not on the main thread.

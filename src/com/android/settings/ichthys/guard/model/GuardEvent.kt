@@ -44,6 +44,23 @@ data class GuardEvent(
     /** What the row shows: the host if known, else the raw IP. */
     val destination: String
         get() = host ?: ip ?: "?"
+
+    companion object {
+        /** The unspecified addresses the system hosts file (HaGeZi) answers blocked names with. */
+        private val SINKHOLES = setOf("0.0.0.0", "::", "0:0:0:0:0:0:0:0")
+
+        /**
+         * IchthysOS: true when the system-wide hosts file blocked this lookup or connect: a DNS
+         * answer made only of sinkhole addresses, or a connect to one. The service's own
+         * `blocked` flag only means the uid was on the firewall's deny chain, so without this
+         * every tracker the hosts file stopped counted as reached.
+         */
+        fun isSinkholed(type: EventType, ips: List<String>, ip: String?): Boolean =
+            when (type) {
+                EventType.DNS -> ips.isNotEmpty() && ips.all { it in SINKHOLES }
+                EventType.CONNECT -> ip != null && ip in SINKHOLES
+            }
+    }
 }
 
 /** An event joined with the app that made it and the tracker it hit, if any. */

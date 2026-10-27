@@ -59,6 +59,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.android.settings.ichthys.guard.data.GuardRepository
 import com.android.settings.ichthys.guard.model.CustomRule
 import com.android.settings.ichthys.guard.model.HostPattern
+import com.android.settings.ichthys.guard.model.HostRules
 import com.android.settings.ichthys.guard.model.RuleAction
 import com.android.settings.ichthys.guard.os.AppInfo
 import com.android.settings.ichthys.guard.ui.theme.Guard
@@ -167,79 +168,94 @@ fun RulesScreen(
             }
         }
 
-        item {
-            GuardCard(title = "Custom rules") {
-                if (book.rules.isEmpty()) {
-                    Text(
-                        "No custom rules. Rules match an app (or all apps) and a host pattern, and win over the tracker list.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Guard.tokens.muted,
-                    )
-                }
-                book.rules
-                    .sortedWith(compareBy({ it.packageName != CustomRule.ANY_APP }, { it.pattern }))
-                    .forEach { r ->
-                        Row(
-                            Modifier.fillMaxWidth()
-                                .clickable { editing = r }
-                                .padding(vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Column(Modifier.weight(1f)) {
-                                Text(
-                                    r.pattern,
-                                    style =
-                                        MaterialTheme.typography.bodyMedium.copy(
-                                            fontFamily = Guard.tokens.mono
-                                        ),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Tag(
-                                        r.action.name,
-                                        emphasized = r.action == RuleAction.ALLOW,
-                                        danger = r.action == RuleAction.BLOCK,
-                                    )
+        // IchthysOS: custom rules aren't enforced yet (HostRules). Saved ones stay listed so
+        // they can be deleted; new ones aren't offered.
+        if (HostRules.ENFORCED || book.rules.isNotEmpty()) {
+            item {
+                GuardCard(title = "Custom rules") {
+                    if (!HostRules.ENFORCED) {
+                        Text(
+                            HostRules.NOT_ENFORCED_NOTE,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Guard.tokens.muted,
+                        )
+                    }
+                    if (book.rules.isEmpty()) {
+                        Text(
+                            "No custom rules. Rules match an app (or all apps) and a host pattern, and win over the tracker list.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Guard.tokens.muted,
+                        )
+                    }
+                    book.rules
+                        .sortedWith(
+                            compareBy({ it.packageName != CustomRule.ANY_APP }, { it.pattern })
+                        )
+                        .forEach { r ->
+                            Row(
+                                Modifier.fillMaxWidth()
+                                    .clickable { editing = r }
+                                    .padding(vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(Modifier.weight(1f)) {
                                     Text(
-                                        if (r.appliesToAll) "All apps"
-                                        else labels[r.packageName] ?: r.packageName,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = Guard.tokens.muted,
+                                        r.pattern,
+                                        style =
+                                            MaterialTheme.typography.bodyMedium.copy(
+                                                fontFamily = Guard.tokens.mono
+                                            ),
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
                                     )
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Tag(
+                                            r.action.name,
+                                            emphasized = r.action == RuleAction.ALLOW,
+                                            danger = r.action == RuleAction.BLOCK,
+                                        )
+                                        Text(
+                                            if (r.appliesToAll) "All apps"
+                                            else labels[r.packageName] ?: r.packageName,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = Guard.tokens.muted,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                    if (r.note.isNotBlank()) {
+                                        Text(
+                                            r.note,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = Guard.tokens.muted,
+                                        )
+                                    }
                                 }
-                                if (r.note.isNotBlank()) {
-                                    Text(
-                                        r.note,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = Guard.tokens.muted,
-                                    )
-                                }
+                                Switch(
+                                    checked = r.enabled,
+                                    onCheckedChange = { on -> repo.addRule(r.copy(enabled = on)) },
+                                )
+                                TextButton(onClick = { repo.removeRule(r.id) }) { Text("Delete") }
                             }
-                            Switch(
-                                checked = r.enabled,
-                                onCheckedChange = { on -> repo.addRule(r.copy(enabled = on)) },
-                            )
-                            TextButton(onClick = { repo.removeRule(r.id) }) { Text("Delete") }
+                            HorizontalDivider(color = Guard.tokens.hairline)
                         }
-                        HorizontalDivider(color = Guard.tokens.hairline)
+                    if (HostRules.ENFORCED) {
+                        Spacer(Modifier.height(8.dp))
+                        OutlinedButton(
+                            onClick = {
+                                editing =
+                                    CustomRule(
+                                        GuardRepository.newId(),
+                                        CustomRule.ANY_APP,
+                                        "",
+                                        RuleAction.BLOCK,
+                                        createdMs = System.currentTimeMillis(),
+                                    )
+                            }
+                        ) {
+                            Text("Add rule")
+                        }
                     }
-                Spacer(Modifier.height(8.dp))
-                OutlinedButton(
-                    onClick = {
-                        editing =
-                            CustomRule(
-                                GuardRepository.newId(),
-                                CustomRule.ANY_APP,
-                                "",
-                                RuleAction.BLOCK,
-                                createdMs = System.currentTimeMillis(),
-                            )
-                    }
-                ) {
-                    Text("Add rule")
                 }
             }
         }
@@ -251,6 +267,13 @@ fun RulesScreen(
         if (hostLists.isNotEmpty()) {
             item {
                 GuardCard(title = "Per-app host lists") {
+                    if (!HostRules.ENFORCED) {
+                        Text(
+                            HostRules.NOT_ENFORCED_NOTE,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Guard.tokens.muted,
+                        )
+                    }
                     hostLists
                         .sortedBy { labels[it.packageName] ?: it.packageName }
                         .forEach { p ->
@@ -305,78 +328,82 @@ fun RulesScreen(
             }
         }
 
-        item {
-            GuardCard(title = "Blocklist sources") {
-                book.sources.forEach { s ->
-                    Row(
-                        Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text(s.name, style = MaterialTheme.typography.bodyLarge)
-                            val info =
-                                buildList {
-                                        if (s.lastUpdatedMs > 0)
-                                            add("updated ${formatAgo(s.lastUpdatedMs)}")
-                                        else add("never updated")
-                                        if (s.entryCount > 0) add("${s.entryCount} entries")
-                                    }
-                                    .joinToString(" · ")
-                            Text(
-                                info,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Guard.tokens.muted,
-                            )
-                            s.lastError?.let {
+        // IchthysOS: nothing reads the downloaded lists until host rules are enforced
+        // (HostRules), so the sources and "Update now" stay hidden.
+        if (HostRules.ENFORCED) {
+            item {
+                GuardCard(title = "Blocklist sources") {
+                    book.sources.forEach { s ->
+                        Row(
+                            Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(s.name, style = MaterialTheme.typography.bodyLarge)
+                                val info =
+                                    buildList {
+                                            if (s.lastUpdatedMs > 0)
+                                                add("updated ${formatAgo(s.lastUpdatedMs)}")
+                                            else add("never updated")
+                                            if (s.entryCount > 0) add("${s.entryCount} entries")
+                                        }
+                                        .joinToString(" · ")
                                 Text(
-                                    it,
+                                    info,
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = Guard.tokens.danger,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis,
+                                    color = Guard.tokens.muted,
                                 )
+                                s.lastError?.let {
+                                    Text(
+                                        it,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = Guard.tokens.danger,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
                             }
+                            Switch(
+                                checked = s.enabled,
+                                onCheckedChange = { repo.setSourceEnabled(s.id, it) },
+                            )
                         }
-                        Switch(
-                            checked = s.enabled,
-                            onCheckedChange = { repo.setSourceEnabled(s.id, it) },
-                        )
                     }
+                    Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedButton(
+                            enabled = !updating,
+                            onClick = {
+                                updating = true
+                                scope.launch {
+                                    val errors =
+                                        try {
+                                            repo.updateSources()
+                                        } catch (e: Exception) {
+                                            listOf(e.message ?: "failed")
+                                        }
+                                    updating = false
+                                    message =
+                                        if (errors.isEmpty()) "Blocklists updated"
+                                        else "Some sources failed: ${errors.joinToString("; ")}"
+                                }
+                            },
+                        ) {
+                            Text("Update now")
+                        }
+                        if (updating) {
+                            CircularProgressIndicator(
+                                Modifier.padding(start = 12.dp).size(20.dp),
+                                strokeWidth = 2.dp,
+                            )
+                        }
+                    }
+                    Text(
+                        "The system hosts file (HaGeZi Light) always stays on. Sources here add to it per app.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Guard.tokens.muted,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
                 }
-                Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedButton(
-                        enabled = !updating,
-                        onClick = {
-                            updating = true
-                            scope.launch {
-                                val errors =
-                                    try {
-                                        repo.updateSources()
-                                    } catch (e: Exception) {
-                                        listOf(e.message ?: "failed")
-                                    }
-                                updating = false
-                                message =
-                                    if (errors.isEmpty()) "Blocklists updated"
-                                    else "Some sources failed: ${errors.joinToString("; ")}"
-                            }
-                        },
-                    ) {
-                        Text("Update now")
-                    }
-                    if (updating) {
-                        CircularProgressIndicator(
-                            Modifier.padding(start = 12.dp).size(20.dp),
-                            strokeWidth = 2.dp,
-                        )
-                    }
-                }
-                Text(
-                    "The system hosts file (HaGeZi Light) always stays on. Sources here add to it per app.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Guard.tokens.muted,
-                    modifier = Modifier.padding(top = 8.dp),
-                )
             }
         }
 

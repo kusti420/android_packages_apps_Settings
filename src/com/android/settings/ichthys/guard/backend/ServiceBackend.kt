@@ -19,6 +19,7 @@ package com.android.settings.ichthys.guard.backend
 import android.os.IBinder
 import android.os.RemoteException
 import android.os.ServiceManager
+import android.os.UserHandle
 import android.util.Log
 import com.android.internal.ichthys.guard.GuardEvent as GuardEventParcel
 import com.android.internal.ichthys.guard.IGuardEventListener
@@ -39,6 +40,11 @@ import kotlinx.coroutines.flow.callbackFlow
  * The binder is looked up lazily and dropped when it dies, so Guard recovers when the service (or
  * system_server) restarts. While the service is unreachable every call returns its fallback and
  * [isLive] is false; policies are still saved and pushed again on the next boot or change.
+ *
+ * IchthysOS: only the system user's Settings may change the service's tables. They are device-wide
+ * and the replace calls overwrite all of them, so a second user's or profile's Settings (Private
+ * Space, a work profile) would wipe the owner's rules with its own app list. Writes from any other
+ * user are dropped here ([write]); reads stay allowed. The AIDL is unchanged.
  */
 class ServiceBackend : GuardBackend {
 
@@ -67,10 +73,10 @@ class ServiceBackend : GuardBackend {
         get() = service() != null
 
     override fun setNetworkPolicy(uid: Int, access: NetworkAccess) =
-        call(Unit) { it.setNetworkPolicy(uid, access.toWire()) }
+        write { it.setNetworkPolicy(uid, access.toWire()) }
 
     override fun replaceNetworkPolicies(policies: Map<Int, NetworkAccess>) =
-        call(Unit) {
+        write {
             val list = policies.filterValues { v -> v != NetworkAccess.ALLOW }.entries.toList()
             it.replaceNetworkPolicies(
                 IntArray(list.size) { i -> list[i].key },
@@ -111,12 +117,12 @@ class ServiceBackend : GuardBackend {
         call(null) { it.getScan(packageName)?.filterNotNull() }
 
     override fun pauseEnforcement(minutes: Int) =
-        call(Unit) { it.pauseEnforcement(if (minutes <= 0) 0 else minutes.coerceAtMost(1440)) }
+        write { it.pauseEnforcement(if (minutes <= 0) 0 else minutes.coerceAtMost(1440)) }
 
     override fun getPausedUntil(): Long = call(0L) { it.pausedUntil }
 
     override fun replaceBehaviours(flags: Map<Int, Int>) =
-        call(Unit) {
+        write {
             val list = flags.filterValues { v -> v != 0 }.entries.toList()
             it.replaceBehaviours(
                 IntArray(list.size) { i -> list[i].key },
@@ -126,7 +132,16 @@ class ServiceBackend : GuardBackend {
 
     override fun isLanDenied(uid: Int): Boolean = call(false) { it.isLanDenied(uid) }
 
-    override fun setAlertMask(mask: Int) = call(Unit) { it.setAlertMask(mask) }
+    override fun setAlertMask(mask: Int) = write { it.setAlertMask(mask) }
+
+    /** A call that changes the service's device-wide state: system user only (see above). */
+    private inline fun write(block: (IIchthysGuard) -> Unit) {
+        if (UserHandle.myUserId() != UserHandle.USER_SYSTEM) {
+            Log.w(TAG, "ichthys_guard write skipped: Guard runs for the system user only")
+            return
+        }
+        call(Unit, block)
+    }
 
     private inline fun <T> call(fallback: T, block: (IIchthysGuard) -> T): T {
         val s = service() ?: return fallback
@@ -153,16 +168,20 @@ class ServiceBackend : GuardBackend {
     }
 }
 
-internal fun GuardEventParcel.toModel() =
-    GuardEvent(
+internal fun GuardEventParcel.toModel(): GuardEvent {
+    val kind = if (type == GuardEventParcel.TYPE_CONNECT) EventType.CONNECT else EventType.DNS
+    val answers = ips.orEmpty().filterNotNull()
+    return GuardEvent(
         seq = seq,
         timeMs = timeMs,
         uid = uid,
-        type = if (type == GuardEventParcel.TYPE_CONNECT) EventType.CONNECT else EventType.DNS,
+        type = kind,
         host = host,
-        ips = ips.orEmpty().filterNotNull(),
+        ips = answers,
         ip = ip,
         port = port,
-        blocked = blocked,
+        // IchthysOS: the firewall's deny chain, or the system hosts file's sinkhole answer.
+        blocked = blocked || GuardEvent.isSinkholed(kind, answers, ip),
         returnCode = returnCode,
     )
+}

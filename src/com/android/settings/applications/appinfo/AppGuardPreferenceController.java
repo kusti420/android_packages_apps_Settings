@@ -21,6 +21,7 @@ import android.text.TextUtils;
 
 import androidx.preference.Preference;
 
+import com.android.settings.ichthys.guard.data.GuardRepository;
 import com.android.settings.ichthys.guard.ui.GuardActivity;
 
 /**
@@ -43,7 +44,9 @@ public class AppGuardPreferenceController extends AppInfoPreferenceControllerBas
 
     @Override
     public int getAvailabilityStatus() {
-        return TextUtils.isEmpty(mPackageName) ? CONDITIONALLY_UNAVAILABLE : AVAILABLE;
+        // IchthysOS: Guard runs for the system user only (GuardRepository.isGuardUser).
+        return TextUtils.isEmpty(mPackageName) || !GuardRepository.isGuardUser()
+                ? CONDITIONALLY_UNAVAILABLE : AVAILABLE;
     }
 
     @Override

@@ -39,6 +39,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.android.settings.ichthys.guard.model.HostPattern
+import com.android.settings.ichthys.guard.model.HostRules
 import com.android.settings.ichthys.guard.model.Insights
 import com.android.settings.ichthys.guard.model.RuleAction
 import com.android.settings.ichthys.guard.model.RuleEngine
@@ -90,10 +91,14 @@ fun DestinationScreen(
                     Tag("not a known tracker")
                 }
                 globalRule?.let {
+                    // IchthysOS: a saved rule, not a block, until host rules are enforced.
                     Tag(
-                        if (it.action == RuleAction.BLOCK) "blocked everywhere"
-                        else "allowed everywhere",
-                        danger = it.action == RuleAction.BLOCK,
+                        when {
+                            it.action != RuleAction.BLOCK -> "allowed everywhere"
+                            HostRules.ENFORCED -> "blocked everywhere"
+                            else -> "block rule, not enforced"
+                        },
+                        danger = it.action == RuleAction.BLOCK && HostRules.ENFORCED,
                     )
                 }
             }
@@ -122,20 +127,32 @@ fun DestinationScreen(
             }
         }
 
-        item {
-            GuardCard(title = "For every app") {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (globalRule != null) {
-                        OutlinedButton(onClick = { repo.removeRule(globalRule.id) }) {
-                            Text("Remove rule")
+        // IchthysOS: host rules aren't enforced yet (HostRules). Only an existing rule is shown,
+        // so it can be removed; no new ones are offered.
+        if (HostRules.ENFORCED || globalRule != null) {
+            item {
+                GuardCard(title = "For every app") {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (globalRule != null) {
+                            OutlinedButton(onClick = { repo.removeRule(globalRule.id) }) {
+                                Text("Remove rule")
+                            }
+                        } else {
+                            OutlinedButton(onClick = { repo.blockHost(null, destination) }) {
+                                Text("Block everywhere")
+                            }
+                            OutlinedButton(onClick = { repo.allowHost(null, destination) }) {
+                                Text("Allow everywhere")
+                            }
                         }
-                    } else {
-                        OutlinedButton(onClick = { repo.blockHost(null, destination) }) {
-                            Text("Block everywhere")
-                        }
-                        OutlinedButton(onClick = { repo.allowHost(null, destination) }) {
-                            Text("Allow everywhere")
-                        }
+                    }
+                    if (!HostRules.ENFORCED) {
+                        Text(
+                            HostRules.NOT_ENFORCED_NOTE,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = t.muted,
+                            modifier = Modifier.padding(top = 6.dp),
+                        )
                     }
                 }
             }
@@ -208,7 +225,7 @@ fun DestinationScreen(
                             ) {
                                 Text("Reset for this app")
                             }
-                        } else {
+                        } else if (HostRules.ENFORCED) {
                             TextButton(onClick = { repo.blockHost(pkg, destination) }) {
                                 Text("Block for this app")
                             }

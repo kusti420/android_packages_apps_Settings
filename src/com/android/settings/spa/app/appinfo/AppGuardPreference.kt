@@ -21,6 +21,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import com.android.settings.R
+import com.android.settings.ichthys.guard.data.GuardRepository
 import com.android.settings.ichthys.guard.ui.GuardActivity
 import com.android.settingslib.spa.widget.preference.Preference
 import com.android.settingslib.spa.widget.preference.PreferenceModel
@@ -35,6 +36,8 @@ import com.android.settingslib.spaprivileged.model.app.userId
 fun AppGuardPreference(app: ApplicationInfo) {
     val context = LocalContext.current
     if (app.userId != context.userId) return
+    // IchthysOS: and Guard runs for the system user only (GuardRepository.isGuardUser).
+    if (!GuardRepository.isGuardUser()) return
 
     val summary = stringResource(R.string.ichthys_guard_app_info_summary)
     Preference(

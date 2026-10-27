@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.android.settings.ichthys.guard.model.AppFilter
 import com.android.settings.ichthys.guard.model.AppPolicy
+import com.android.settings.ichthys.guard.model.HostRules
 import com.android.settings.ichthys.guard.model.LocalNetwork
 import com.android.settings.ichthys.guard.model.NetworkAccess
 import com.android.settings.ichthys.guard.model.RiskScore
@@ -191,8 +192,11 @@ fun AppsScreen(vm: GuardViewModel, onOpenApp: (String) -> Unit, modifier: Modifi
 }
 
 fun policySummary(p: AppPolicy): String =
+    // IchthysOS: tracker levels and host lists aren't enforced yet (HostRules); don't call them
+    // blocks.
     if (p.isDefault) {
-        "Shielded · monitored, known trackers blocked"
+        if (HostRules.ENFORCED) "Shielded · monitored, known trackers blocked"
+        else "Shielded · monitored"
     } else {
         buildList {
                 add(
@@ -202,13 +206,14 @@ fun policySummary(p: AppPolicy): String =
                         NetworkAccess.DENY -> "No network"
                     }
                 )
-                add(
-                    when (p.trackerBlock) {
-                        TrackerBlockLevel.OFF -> "trackers allowed"
-                        TrackerBlockLevel.KNOWN_TRACKERS -> "trackers blocked"
-                        TrackerBlockLevel.STRICT -> "strict"
-                    }
-                )
+                if (HostRules.ENFORCED)
+                    add(
+                        when (p.trackerBlock) {
+                            TrackerBlockLevel.OFF -> "trackers allowed"
+                            TrackerBlockLevel.KNOWN_TRACKERS -> "trackers blocked"
+                            TrackerBlockLevel.STRICT -> "strict"
+                        }
+                    )
                 if (p.contactsAllowed) add("real contacts")
                 if (p.clipboardAllowed) add("clipboard at any time")
                 if (p.sensorsExempt) add("exact sensors")
@@ -218,8 +223,12 @@ fun policySummary(p: AppPolicy): String =
                 if (p.localNetwork == LocalNetwork.BLOCK) add("no local network")
                 if (p.tags.isNotEmpty()) add(p.tags.joinToString("/") { it.label.lowercase() })
                 if (p.dormant) add("paused (unused)")
-                if (p.blockedHosts.isNotEmpty()) add("${p.blockedHosts.size} hosts blocked")
-                if (p.allowedHosts.isNotEmpty()) add("${p.allowedHosts.size} hosts allowed")
+                if (HostRules.ENFORCED) {
+                    if (p.blockedHosts.isNotEmpty()) add("${p.blockedHosts.size} hosts blocked")
+                    if (p.allowedHosts.isNotEmpty()) add("${p.allowedHosts.size} hosts allowed")
+                } else if (p.blockedHosts.isNotEmpty() || p.allowedHosts.isNotEmpty()) {
+                    add("host rules not enforced")
+                }
             }
             .joinToString(" · ")
     }

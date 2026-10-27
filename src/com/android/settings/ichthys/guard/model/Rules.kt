@@ -110,17 +110,49 @@ enum class VerdictSource {
     PAUSED,
 }
 
-data class Verdict(val blocked: Boolean, val source: VerdictSource, val rule: CustomRule? = null)
+/**
+ * IchthysOS: whether the platform enforces per-host rules (tracker level, per-app host lists,
+ * custom rules, blocklist sources). Phase 2, per-uid DNS filtering in IchthysGuardService, does
+ * not exist yet: GuardBackend has no host method and nothing reads the downloaded lists. While
+ * this is false the UI must not claim those rules block anything: verdicts report them as
+ * [Verdict.notEnforced] instead of blocked, the controls that only create such rules are hidden,
+ * and the cards that show saved ones say they aren't enforced. What does block today: the uid
+ * firewall (network Block / Wi-Fi only, lockdown, screen-off, background) and the system-wide
+ * hosts file.
+ */
+object HostRules {
+    const val ENFORCED = false
+
+    /** One line for every card that shows saved host or tracker rules. */
+    const val NOT_ENFORCED_NOTE =
+        "Not enforced yet: Guard saves host and tracker rules but doesn't apply them. Only the " +
+            "system-wide blocklist (HaGeZi Light) blocks trackers, for every app."
+}
+
+/**
+ * [blocked] is what happens to the connection. [notEnforced]: a saved host or tracker rule
+ * ([source]) asks for a block that the platform doesn't apply yet (see [HostRules]).
+ */
+data class Verdict(
+    val blocked: Boolean,
+    val source: VerdictSource,
+    val rule: CustomRule? = null,
+    val notEnforced: Boolean = false,
+)
 
 /**
  * The single decision function for "would this app reach this host?". Mirrors what the platform
- * enforces (phase 1: uid network access; phase 2: per-host rules) so the UI can explain a verdict
- * and preview a rule before saving it.
+ * enforces (phase 1: uid network access; phase 2: per-host rules, not built yet, see [HostRules])
+ * so the UI can explain a verdict and preview a rule before saving it.
  *
  * Order: pause > lockdown > network DENY > per-app host lists > custom rules (app-specific beats
  * global, then most specific pattern, BLOCK wins a tie) > STRICT > tracker DB > allow.
  */
 object RuleEngine {
+    /** A block asked for by a host-level rule: real only once [HostRules.ENFORCED]. */
+    private fun hostBlock(source: VerdictSource, rule: CustomRule? = null) =
+        Verdict(HostRules.ENFORCED, source, rule, notEnforced = !HostRules.ENFORCED)
+
     fun decide(
         pkg: String?,
         host: String,
@@ -141,15 +173,16 @@ object RuleEngine {
             if (policy.allowedHosts.any { HostPattern.matches(it, h) })
                 return Verdict(false, VerdictSource.APP_ALLOWED_HOST)
             if (policy.blockedHosts.any { HostPattern.matches(it, h) })
-                return Verdict(true, VerdictSource.APP_BLOCKED_HOST)
+                return hostBlock(VerdictSource.APP_BLOCKED_HOST)
         }
         bestRule(pkg, h, rules)?.let {
-            return Verdict(it.action == RuleAction.BLOCK, VerdictSource.CUSTOM_RULE, it)
+            return if (it.action == RuleAction.BLOCK) hostBlock(VerdictSource.CUSTOM_RULE, it)
+            else Verdict(false, VerdictSource.CUSTOM_RULE, it)
         }
         val level = policy?.trackerBlock ?: TrackerBlockLevel.KNOWN_TRACKERS
-        if (level == TrackerBlockLevel.STRICT) return Verdict(true, VerdictSource.STRICT)
+        if (level == TrackerBlockLevel.STRICT) return hostBlock(VerdictSource.STRICT)
         if (isTracker && level == TrackerBlockLevel.KNOWN_TRACKERS)
-            return Verdict(true, VerdictSource.TRACKER)
+            return hostBlock(VerdictSource.TRACKER)
         return Verdict(false, VerdictSource.DEFAULT)
     }
 

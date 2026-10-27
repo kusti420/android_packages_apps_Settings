@@ -37,8 +37,22 @@ class GuardViewModel(app: Application) : AndroidViewModel(app) {
     val repo: GuardRepository = GuardRepository.get(app)
 
     val today: StateFlow<Summary> =
-        repo.events
-            .map { Insights.summarize(it, sinceMs = startOfDay()) }
+        combine(repo.events, repo.stats) { evs, history ->
+                val s = Insights.summarize(evs, sinceMs = startOfDay())
+                // IchthysOS: the in-memory window holds only the newest MAX_EVENTS events; on a
+                // busy day the persisted counters (every event) are the complete totals.
+                val d = history.days[StatsHistory.epochDay(System.currentTimeMillis())]
+                if (d == null || d.total <= s.queries + s.connects) s
+                else
+                    s.copy(
+                        queries = d.queries,
+                        connects = d.connects,
+                        trackersSeen = d.trackersSeen,
+                        trackersBlocked = d.trackersBlocked,
+                        blockedTotal = d.blockedTotal,
+                        score = d.score,
+                    )
+            }
             .stateIn(
                 viewModelScope,
                 SharingStarted.WhileSubscribed(5_000),

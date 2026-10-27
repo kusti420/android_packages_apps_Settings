@@ -306,7 +306,13 @@ object GalleryCleanup {
     }
 
     private fun saveState(context: Context, folders: List<HiddenFolder>) {
-        File(context.filesDir, STATE_FILE)
-            .writeText(folders.joinToString("") { "${it.category.name}\t${it.relativePath}\n" })
+        // IchthysOS: runs on the job's raw thread; a full disk must not kill Settings and leave the
+        // content-triggered job unarmed.
+        try {
+            File(context.filesDir, STATE_FILE)
+                .writeText(folders.joinToString("") { "${it.category.name}\t${it.relativePath}\n" })
+        } catch (e: IOException) {
+            Log.w(TAG, "Could not save the hidden folder list", e)
+        }
     }
 }

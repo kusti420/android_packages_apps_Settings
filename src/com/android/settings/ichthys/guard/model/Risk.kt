@@ -62,6 +62,9 @@ data class RiskScore(val score: Int, val factors: List<RiskFactor>) {
  * Per-app risk score, 0..100 (W8b decision 18): trackers embedded and contacted, dangerous
  * permissions, background data and how many domains it talks to. What Guard already enforces
  * lowers it: strict tracker blocking, background network off, a blocked network.
+ *
+ * IchthysOS: tracker levels count (and the strict-tracker fix is offered) only once host rules
+ * are enforced ([HostRules.ENFORCED]); until then they would lower the score for nothing.
  */
 object RiskScorer {
     fun score(
@@ -72,13 +75,17 @@ object RiskScorer {
     ): RiskScore {
         val out = mutableListOf<RiskFactor>()
         val trackerFactor =
-            when (policy.trackerBlock) {
-                TrackerBlockLevel.OFF -> 1.0
-                TrackerBlockLevel.KNOWN_TRACKERS -> 0.6
-                TrackerBlockLevel.STRICT -> 0.25
-            }
+            if (!HostRules.ENFORCED) 1.0
+            else
+                when (policy.trackerBlock) {
+                    TrackerBlockLevel.OFF -> 1.0
+                    TrackerBlockLevel.KNOWN_TRACKERS -> 0.6
+                    TrackerBlockLevel.STRICT -> 0.25
+                }
         val strictFix =
-            RiskFix.STRICT_TRACKERS.takeIf { policy.trackerBlock != TrackerBlockLevel.STRICT }
+            RiskFix.STRICT_TRACKERS.takeIf {
+                HostRules.ENFORCED && policy.trackerBlock != TrackerBlockLevel.STRICT
+            }
         val n = facts.trackers?.size ?: 0
         if (n > 0) {
             out +=

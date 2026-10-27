@@ -35,6 +35,7 @@ import android.database.ContentObserver
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.UserHandle
 import android.provider.Settings
 import android.util.Log
 import com.android.settings.R
@@ -71,6 +72,8 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
 import java.util.UUID
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -143,6 +146,8 @@ class GuardRepository(
 
     private var uidToApp: Map<Int, AppInfo> = emptyMap()
     private var lastSeq = 0L
+    /** IchthysOS: released once [start]'s first backfill has run (see [awaitBackfill]). */
+    private val backfilled = CountDownLatch(1)
 
     /** Guards every read-modify-write of [_policies] (main thread, workers, the observer). */
     private val policyLock = Any()
@@ -167,7 +172,7 @@ class GuardRepository(
             }
             if (set != _policies.value) {
                 _policies.value = set
-                policyStore.save(set)
+                savePolicies(set)
             }
         }
     }
@@ -231,7 +236,11 @@ class GuardRepository(
             pushBehaviours()
             scheduleProfileTick()
             launch { loadRiskFacts() }
-            backfill()
+            try {
+                backfill()
+            } finally {
+                backfilled.countDown()
+            }
             backend.liveEvents().collect { ingest(it) }
         }
     }
@@ -247,9 +256,22 @@ class GuardRepository(
     fun appFor(pkg: String): AppInfo? =
         _apps.value.firstOrNull { it.packageName == pkg } ?: inspector.app(pkg)
 
-    /** Pages through the service's ring buffer (oldest first) and keeps the newest window. */
+    /**
+     * Waits (off the main thread) until the first backfill after process start has been counted,
+     * so a reader of [stats] (the weekly report) doesn't see a week without today's events.
+     */
+    fun awaitBackfill(timeoutMs: Long = 15_000): Boolean =
+        backfilled.await(timeoutMs, TimeUnit.MILLISECONDS)
+
+    /**
+     * Pages through the service's ring buffer (oldest first) and keeps the newest window.
+     * IchthysOS: paging starts at what [stats] already counted, not at the newest [MAX_EVENTS],
+     * so the per-day counters see every buffered event; [ingest] still keeps only the newest
+     * window in memory.
+     */
     private fun backfill() {
-        lastSeq = maxOf(lastSeq, backend.getLatestSeq() - MAX_EVENTS)
+        val newestWindow = backend.getLatestSeq() - MAX_EVENTS
+        lastSeq = maxOf(lastSeq, minOf(_stats.value.lastSeq, newestWindow).coerceAtLeast(0))
         var pages = 0
         while (pages++ < MAX_BACKFILL_PAGES) {
             val page = backend.getEvents(lastSeq, PAGE)
@@ -303,6 +325,19 @@ class GuardRepository(
 
     // ---- policies -------------------------------------------------------------------------
 
+    /**
+     * IchthysOS: PolicyStore.save throws on a full disk. The change still applies (memory, OS
+     * lists, the service); it is only lost at the next restart, so log instead of crashing
+     * Settings from a click handler or a receiver.
+     */
+    private fun savePolicies(set: PolicySet) {
+        try {
+            policyStore.save(set)
+        } catch (e: IOException) {
+            Log.w(TAG, "policies not saved", e)
+        }
+    }
+
     fun updatePolicy(pkg: String, change: (AppPolicy) -> AppPolicy) {
         val before: AppPolicy
         val after: AppPolicy
@@ -317,9 +352,9 @@ class GuardRepository(
                 }
             }
             _policies.value = next
-            policyStore.save(next)
+            savePolicies(next)
         }
-        appFor(pkg)?.let { backend.setNetworkPolicy(it.uid, effectiveAccess(pkg)) }
+        appFor(pkg)?.let { backend.setNetworkPolicy(it.uid, effectiveUidAccess(it.uid, pkg)) }
         if (
             before.screenOffBlock != after.screenOffBlock ||
                 before.backgroundNetworkOff != after.backgroundNetworkOff ||
@@ -351,6 +386,21 @@ class GuardRepository(
         for (p in _automation.value.activeProfiles()) {
             if (p.matches(pkg, policy.tags) && p.network.ordinal > access.ordinal)
                 access = p.network
+        }
+        return access
+    }
+
+    /**
+     * IchthysOS: what the firewall should hold for [uid]: the strictest [effectiveAccess] of every
+     * package sharing it (as [pushAllNetworkPolicies] does), so changing one package doesn't
+     * override a stricter sibling. [pkg] counts even before [apps] lists it.
+     */
+    private fun effectiveUidAccess(uid: Int, pkg: String): NetworkAccess {
+        var access = effectiveAccess(pkg)
+        for (app in _apps.value) {
+            if (app.uid != uid || app.packageName == pkg) continue
+            val other = effectiveAccess(app.packageName)
+            if (other.ordinal > access.ordinal) access = other
         }
         return access
     }
@@ -457,7 +507,12 @@ class GuardRepository(
     private fun saveRules(book: RuleBook) {
         val wasLocked = _rules.value.lockdown.enabled
         _rules.value = book
-        ruleStore.save(book)
+        try {
+            ruleStore.save(book)
+        } catch (e: IOException) {
+            // IchthysOS: a full disk must not take Settings down; the change still applies now.
+            Log.w(TAG, "rules not saved", e)
+        }
         // SystemUI's Lockdown tile caches the state, so every path that flips it (the switch, the
         // tile, an imported backup) announces the change here.
         if (book.lockdown.enabled != wasLocked) {
@@ -486,7 +541,12 @@ class GuardRepository(
     fun setLockdown(enabled: Boolean) {
         if (_apps.value.isEmpty()) refreshApps() // e.g. toggled from the QS tile on a cold start
         val lock = _rules.value.lockdown
-        val allow = if (lock.allowlist.isEmpty()) defaultLockdownAllowlist() else lock.allowlist
+        // IchthysOS: seed the default allowlist once. An allowlist the user emptied on purpose
+        // stays empty.
+        val seeded = prefs.getBoolean(KEY_LOCKDOWN_SEEDED, false)
+        val allow =
+            if (lock.allowlist.isEmpty() && !seeded) defaultLockdownAllowlist() else lock.allowlist
+        if (!seeded) prefs.edit().putBoolean(KEY_LOCKDOWN_SEEDED, true).apply()
         saveRules(
             _rules.value.copy(
                 lockdown =
@@ -502,6 +562,8 @@ class GuardRepository(
 
     fun setLockdownAllowed(pkg: String, allowed: Boolean) {
         val lock = _rules.value.lockdown
+        // The user is choosing the list; never replace it with the defaults afterwards.
+        prefs.edit().putBoolean(KEY_LOCKDOWN_SEEDED, true).apply()
         saveRules(
             _rules.value.copy(
                 lockdown =
@@ -906,7 +968,7 @@ class GuardRepository(
                 }
             }
             _policies.value = merged.policies
-            policyStore.save(merged.policies)
+            savePolicies(merged.policies)
         }
         scope.launch { pushAllNetworkPolicies() }
         return imported.rules.size
@@ -914,7 +976,9 @@ class GuardRepository(
 
     /**
      * Downloads enabled blocklist sources into filesDir/lists and records count + sha256. Phase 2
-     * hands these to the platform DNS hook; for now they feed the UI and the matcher.
+     * hands these to the platform DNS hook. IchthysOS: nothing reads them yet (not even the
+     * matcher, which uses the bundled tracker DB), so the Rules page hides the sources while
+     * [com.android.settings.ichthys.guard.model.HostRules.ENFORCED] is false.
      */
     suspend fun updateSources(): List<String> =
         withContext(Dispatchers.IO) {
@@ -970,12 +1034,21 @@ class GuardRepository(
         private const val MAX_BACKFILL_PAGES = 60
         private const val KEY_PAUSED_UNTIL = "paused_until"
         private const val KEY_SENSORS_MIGRATED = "sensor_exemptions_migrated"
+        private const val KEY_LOCKDOWN_SEEDED = "lockdown_allowlist_seeded"
         private const val DATA_DIR = "ichthys_guard"
         private const val PREFS_NAME = "ichthys_guard"
         private val DEFAULT_LOCKDOWN_HINTS =
             listOf("dialer", "messaging", "contacts", "signal", "org.ichthys")
 
         fun newId(): String = UUID.randomUUID().toString().substring(0, 8)
+
+        /**
+         * IchthysOS: Guard runs for the system user only. IchthysGuardService holds one
+         * device-wide table, so another user's or profile's Settings (Private Space, a work
+         * profile) must not push its own app list over the owner's rules. Other users get no
+         * Guard page, receivers or alarms, and [ServiceBackend] drops their writes.
+         */
+        @JvmStatic fun isGuardUser(): Boolean = UserHandle.myUserId() == UserHandle.USER_SYSTEM
 
         @Volatile private var instance: GuardRepository? = null
 

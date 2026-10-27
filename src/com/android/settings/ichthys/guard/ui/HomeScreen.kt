@@ -50,6 +50,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.android.settings.ichthys.guard.data.GuardRepository
+import com.android.settings.ichthys.guard.model.HostRules
 import com.android.settings.ichthys.guard.model.PeriodReport
 import com.android.settings.ichthys.guard.os.SHIELD_SECTIONS
 import com.android.settings.ichthys.guard.ui.theme.Guard
@@ -282,8 +283,11 @@ fun HomeScreen(
                         Text("Resume protection now")
                     }
                 } else {
+                    // IchthysOS: per-app tracker rules aren't enforced yet (HostRules); the
+                    // system-wide hosts file is what blocks trackers today.
                     Text(
-                        "On · every app monitored, known trackers blocked",
+                        if (HostRules.ENFORCED) "On · every app monitored, known trackers blocked"
+                        else "On · every app monitored, system blocklist on",
                         style = MaterialTheme.typography.titleMedium,
                     )
                     Row(
@@ -316,7 +320,7 @@ fun HomeScreen(
                             color = if (status.lockdown) t.danger else t.text,
                         )
                         Text(
-                            "Cuts the network for every app except your allowlist (edit it in Rules). Emergency calls are never affected.",
+                            "Cuts the network for every app Guard lists, except your allowlist (edit it in Rules). System services without an icon keep theirs. Emergency calls are never affected.",
                             style = MaterialTheme.typography.bodySmall,
                             color = t.muted,
                         )

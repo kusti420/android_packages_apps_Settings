@@ -22,6 +22,7 @@ import android.content.Intent
 import android.os.UserManager
 import com.android.settings.ichthys.guard.data.GuardRepository
 import com.android.settings.ichthys.guard.model.AlertType
+import com.android.settings.ichthys.guard.model.HostRules
 import com.android.settings.ichthys.guard.model.NetworkAccess
 import com.android.settings.ichthys.guard.model.TrackerBlockLevel
 
@@ -31,13 +32,14 @@ import com.android.settings.ichthys.guard.model.TrackerBlockLevel
  */
 class PackageAddedReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action != Intent.ACTION_PACKAGE_ADDED) return
+        if (intent.action != Intent.ACTION_PACKAGE_ADDED || !GuardRepository.isGuardUser()) return
         if (intent.getBooleanExtra(Intent.EXTRA_REPLACING, false)) return
         val pkg = intent.data?.schemeSpecificPart ?: return
         runAsync {
             val repo = GuardRepository.get(context)
             repo.refreshApps()
             GuardNotifications.notifyNewApp(context, pkg)
+            GuardNotifications.markAnnounced(context)
             repo.riskFactsFor(pkg)
         }
     }
@@ -50,6 +52,7 @@ class PackageAddedReceiver : BroadcastReceiver() {
  */
 class AppScannedReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        if (!GuardRepository.isGuardUser()) return
         if (intent.action == GuardNotifications.ACTION_ALERT) {
             val pkg = intent.getStringExtra(GuardNotifications.EXTRA_PACKAGE) ?: return
             val type =
@@ -75,6 +78,7 @@ class AppScannedReceiver : BroadcastReceiver() {
  */
 class NotificationActionReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        if (!GuardRepository.isGuardUser()) return
         when (intent.action) {
             GuardNotifications.ACTION_PROFILE_TICK -> {
                 runAsync { GuardRepository.get(context).onScheduleTick() }
@@ -98,6 +102,17 @@ class NotificationActionReceiver : BroadcastReceiver() {
                     GuardNotifications.confirm(context, pkg, "$label: network blocked")
                 }
                 GuardNotifications.ACTION_STRICT -> {
+                    // IchthysOS: only notifications from before HostRules still carry the button.
+                    // STRICT with no allowed hosts would cut the app off once host rules are
+                    // enforced, and does nothing until then, so it isn't saved.
+                    if (!HostRules.ENFORCED) {
+                        GuardNotifications.confirm(
+                            context,
+                            pkg,
+                            "$label: per-app tracker blocking isn't available yet",
+                        )
+                        return@runAsync
+                    }
                     repo.updatePolicy(pkg) { it.copy(trackerBlock = TrackerBlockLevel.STRICT) }
                     GuardNotifications.confirm(context, pkg, "$label: strict mode on")
                 }
@@ -108,17 +123,32 @@ class NotificationActionReceiver : BroadcastReceiver() {
 
 class WeeklyReportReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        if (!GuardRepository.isGuardUser()) return
         runAsync { GuardNotifications.postWeeklyReport(context) }
     }
 }
 
 /**
- * Re-arms the weekly alarm and re-pushes every app's network policy after boot. BOOT_COMPLETED
- * comes after the user unlocked, so this also finishes [GuardNotifications.init] when the Settings
- * process was already running in direct boot (FallbackHome) and skipped it.
+ * Re-arms the weekly alarm and re-pushes every app's network policy after boot, and re-evaluates
+ * the profile schedule after a clock or time-zone change. BOOT_COMPLETED comes after the user
+ * unlocked, so this also finishes [GuardNotifications.init] when the Settings process was already
+ * running in direct boot (FallbackHome) and skipped it.
  */
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        // IchthysOS: every user's BOOT_COMPLETED lands here. Only the system user's Guard may
+        // push; another user's app list would replace the owner's whole table.
+        if (!GuardRepository.isGuardUser()) return
+        if (
+            intent.action == Intent.ACTION_TIME_CHANGED ||
+                intent.action == Intent.ACTION_TIMEZONE_CHANGED
+        ) {
+            // IchthysOS: the clock moved, so profile windows open or close at other times. Guard's
+            // state is credential-protected; before the first unlock BOOT_COMPLETED re-arms all.
+            if (context.getSystemService(UserManager::class.java)?.isUserUnlocked != true) return
+            runAsync { GuardRepository.get(context).onScheduleTick() }
+            return
+        }
         if (intent.action != Intent.ACTION_BOOT_COMPLETED) return
         runAsync {
             GuardNotifications.init(context)
@@ -142,6 +172,11 @@ class BootReceiver : BroadcastReceiver() {
 class LockdownControlReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != ACTION_LOCKDOWN) return
+        // IchthysOS: Guard (and its lockdown) belongs to the system user only.
+        if (!GuardRepository.isGuardUser()) {
+            if (isOrderedBroadcast) resultCode = 0
+            return
+        }
         // The rules are in credential-protected storage. Before the first unlock after a boot
         // the tile already asks for its state; answer "off" instead of crashing on the storage.
         if (context.getSystemService(UserManager::class.java)?.isUserUnlocked != true) {

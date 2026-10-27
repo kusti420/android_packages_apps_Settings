@@ -28,7 +28,10 @@ enum class NetworkAccess {
     DENY,
 }
 
-/** How aggressively tracker/ad hosts are blocked for this app, on top of the system hosts list. */
+/**
+ * How aggressively tracker/ad hosts are blocked for this app, on top of the system hosts list.
+ * IchthysOS: saved only; not enforced until [HostRules.ENFORCED].
+ */
 @Serializable
 enum class TrackerBlockLevel {
     /** Only the system-wide hosts blocker (HaGeZi) applies. */

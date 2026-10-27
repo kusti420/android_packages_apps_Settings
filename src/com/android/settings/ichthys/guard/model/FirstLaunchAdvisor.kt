@@ -148,7 +148,9 @@ data class Recommendation(val policy: AppPolicy, val lines: List<AdviceLine>) {
  *
  * Rules:
  * 1. Trackers found and the app is not a browser → trackerBlock STRICT when there are at least
- *    [STRICT_TRACKER_THRESHOLD], else KNOWN_TRACKERS.
+ *    [STRICT_TRACKER_THRESHOLD], else KNOWN_TRACKERS. IchthysOS: STRICT only once host rules are
+ *    enforced ([HostRules.ENFORCED]). Until then it would do nothing, and saved with an empty
+ *    allowlist it would cut every connection of the app on the day phase 2 ships.
  * 2. No INTERNET permission → nothing to restrict network-wise (network stays default).
  * 3. Otherwise the Shielded defaults.
  */
@@ -163,7 +165,7 @@ object FirstLaunchAdvisor {
                 trackers == null -> base.trackerBlock to AdviceReason.TRACKERS_UNKNOWN
                 trackers.isEmpty() -> base.trackerBlock to AdviceReason.TRACKERS_NONE
                 facts.isBrowser -> base.trackerBlock to AdviceReason.TRACKERS_BROWSER
-                trackers.size >= STRICT_TRACKER_THRESHOLD ->
+                HostRules.ENFORCED && trackers.size >= STRICT_TRACKER_THRESHOLD ->
                     TrackerBlockLevel.STRICT to AdviceReason.TRACKERS_STRICT
                 else -> TrackerBlockLevel.KNOWN_TRACKERS to AdviceReason.TRACKERS_KNOWN
             }

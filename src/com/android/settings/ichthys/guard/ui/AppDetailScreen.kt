@@ -47,6 +47,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.android.settings.ichthys.guard.model.AppPolicy
 import com.android.settings.ichthys.guard.model.AppTag
+import com.android.settings.ichthys.guard.model.HostRules
 import com.android.settings.ichthys.guard.model.Insights
 import com.android.settings.ichthys.guard.model.LocalNetwork
 import com.android.settings.ichthys.guard.model.NetworkAccess
@@ -313,56 +314,70 @@ fun AppDetailScreen(
                 )
             }
         }
-        item {
-            GuardCard(title = "Tracker blocking") {
-                Segmented(
-                    TrackerBlockLevel.entries,
-                    policy.trackerBlock,
-                    label = {
-                        when (it) {
-                            TrackerBlockLevel.OFF -> "Off"
-                            TrackerBlockLevel.KNOWN_TRACKERS -> "Known"
-                            TrackerBlockLevel.STRICT -> "Strict"
-                        }
-                    },
-                    onSelect = { l -> update { it.copy(trackerBlock = l) } },
-                )
-                Text(
-                    when (policy.trackerBlock) {
-                        TrackerBlockLevel.OFF -> "Only the system-wide blocklist applies."
-                        TrackerBlockLevel.KNOWN_TRACKERS ->
-                            "Hosts in the tracker database are blocked for this app."
-                        TrackerBlockLevel.STRICT ->
-                            "Only hosts you allowed are reachable (${policy.allowedHosts.size} allowed). Allow hosts from the log below."
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = t.muted,
-                    modifier = Modifier.padding(top = 6.dp),
-                )
-                val learned = Insights.learnAllowlist(events, packageName) - policy.allowedHosts
-                if (learned.isNotEmpty()) {
-                    TextButton(
-                        onClick = {
-                            update {
-                                it.copy(
-                                    trackerBlock = TrackerBlockLevel.STRICT,
-                                    allowedHosts = it.allowedHosts + learned,
-                                )
-                            }
-                        }
-                    ) {
-                        Text(
-                            if (policy.trackerBlock == TrackerBlockLevel.STRICT)
-                                "Allow ${learned.size} more hosts it used"
-                            else "Strict with the ${learned.size} hosts it needs"
-                        )
-                    }
+        // IchthysOS: per-app tracker levels aren't enforced yet (HostRules), so the card says so
+        // instead of offering a choice that does nothing.
+        if (!HostRules.ENFORCED) {
+            item {
+                GuardCard(title = "Tracker blocking") {
                     Text(
-                        learned.sorted().take(6).joinToString(" · ") +
-                            if (learned.size > 6) " …" else "",
-                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = t.mono),
+                        HostRules.NOT_ENFORCED_NOTE,
+                        style = MaterialTheme.typography.bodySmall,
                         color = t.muted,
                     )
+                }
+            }
+        } else {
+            item {
+                GuardCard(title = "Tracker blocking") {
+                    Segmented(
+                        TrackerBlockLevel.entries,
+                        policy.trackerBlock,
+                        label = {
+                            when (it) {
+                                TrackerBlockLevel.OFF -> "Off"
+                                TrackerBlockLevel.KNOWN_TRACKERS -> "Known"
+                                TrackerBlockLevel.STRICT -> "Strict"
+                            }
+                        },
+                        onSelect = { l -> update { it.copy(trackerBlock = l) } },
+                    )
+                    Text(
+                        when (policy.trackerBlock) {
+                            TrackerBlockLevel.OFF -> "Only the system-wide blocklist applies."
+                            TrackerBlockLevel.KNOWN_TRACKERS ->
+                                "Hosts in the tracker database are blocked for this app."
+                            TrackerBlockLevel.STRICT ->
+                                "Only hosts you allowed are reachable (${policy.allowedHosts.size} allowed). Allow hosts from the log below."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = t.muted,
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
+                    val learned = Insights.learnAllowlist(events, packageName) - policy.allowedHosts
+                    if (learned.isNotEmpty()) {
+                        TextButton(
+                            onClick = {
+                                update {
+                                    it.copy(
+                                        trackerBlock = TrackerBlockLevel.STRICT,
+                                        allowedHosts = it.allowedHosts + learned,
+                                    )
+                                }
+                            }
+                        ) {
+                            Text(
+                                if (policy.trackerBlock == TrackerBlockLevel.STRICT)
+                                    "Allow ${learned.size} more hosts it used"
+                                else "Strict with the ${learned.size} hosts it needs"
+                            )
+                        }
+                        Text(
+                            learned.sorted().take(6).joinToString(" · ") +
+                                if (learned.size > 6) " …" else "",
+                            style = MaterialTheme.typography.labelSmall.copy(fontFamily = t.mono),
+                            color = t.muted,
+                        )
+                    }
                 }
             }
         }
@@ -532,7 +547,7 @@ fun AppDetailScreen(
                                 ) {
                                     Text("Reset host")
                                 }
-                            } else {
+                            } else if (HostRules.ENFORCED) {
                                 TextButton(onClick = { repo.blockHost(packageName, h) }) {
                                     Text("Block")
                                 }
@@ -588,7 +603,16 @@ fun AppDetailScreen(
                     Text("Open system app info")
                 }
                 if (!policy.isDefault) {
-                    TextButton(onClick = { update { AppPolicy(packageName) } }) {
+                    TextButton(
+                        onClick = {
+                            // IchthysOS: a paused (auto-tightened) app is also suspended; lift
+                            // that too, or it stays unopenable with a Shielded policy.
+                            val wasDormant = policy.dormant
+                            update { AppPolicy(packageName) }
+                            if (wasDormant)
+                                scope.launch(Dispatchers.IO) { repo.restoreDormant(packageName) }
+                        }
+                    ) {
                         Text("Reset to Shielded")
                     }
                 }
