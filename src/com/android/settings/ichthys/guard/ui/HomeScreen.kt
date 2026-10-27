@@ -132,7 +132,9 @@ fun HomeScreen(
             item {
                 GuardCard(title = "Service unavailable") {
                     Text(
-                        "The ichthys_guard platform service isn't reachable, so no live traffic is shown and network rules aren't enforced. Network policies are still saved and applied once it is back; the shields and data access don't depend on it.",
+                        // IchthysOS: say when saved rules reach the firewall (the next push: a
+                        // boot or a change), not "once it is back", which nothing watches for.
+                        "The ichthys_guard platform service isn't reachable, so no live traffic is shown and network rules, lockdown and pause aren't enforced. Your rules are saved and sent to the service at the next restart or change. The shields and data access don't depend on it.",
                         style = MaterialTheme.typography.bodySmall,
                         color = t.muted,
                     )
@@ -154,21 +156,35 @@ fun HomeScreen(
         }
         item {
             GuardCard(title = "Privacy today") {
+                // IchthysOS: with no traffic at all (a quiet morning, or the service missing) the
+                // score formula returns 100. Show that nothing was measured instead of an "A".
+                val measured = s.queries + s.connects > 0
                 Row(verticalAlignment = Alignment.Bottom) {
                     Text(
-                        "${s.score}",
+                        if (measured) "${s.score}" else "–",
                         style = MaterialTheme.typography.displayLarge.copy(fontFamily = t.display),
                         color = t.text,
                     )
                     Text(
-                        " / 100 · ${s.grade}",
+                        if (measured) " / 100 · ${s.grade}" else " / 100",
                         style = MaterialTheme.typography.titleMedium.copy(fontFamily = t.mono),
                         color = t.muted,
                         modifier = Modifier.padding(bottom = 10.dp),
                     )
                 }
                 // The score bar is this group's one accented element.
-                ShareBar(s.score / 100f, Modifier.padding(vertical = 8.dp), color = t.accent)
+                ShareBar(
+                    if (measured) s.score / 100f else 0f,
+                    Modifier.padding(vertical = 8.dp),
+                    color = t.accent,
+                )
+                if (!measured) {
+                    Text(
+                        "No network activity recorded today yet, so there is nothing to score.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = t.muted,
+                    )
+                }
                 Row(
                     Modifier.fillMaxWidth().padding(top = 8.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -266,8 +282,11 @@ fun HomeScreen(
                         style = MaterialTheme.typography.titleLarge.copy(fontFamily = t.mono),
                         color = t.danger,
                     )
+                    // IchthysOS: a pause lifts the uid firewall (Block, Wi-Fi only, lockdown,
+                    // screen-off, background); the hosts file and the shields aren't part of it.
                     Text(
-                        "Monitoring continues; blocking is off.",
+                        "Monitoring continues. Network blocks and lockdown are off; the " +
+                            "system-wide blocklist and the data shields still apply.",
                         style = MaterialTheme.typography.bodySmall,
                         color = t.muted,
                     )
@@ -294,14 +313,18 @@ fun HomeScreen(
                         Modifier.fillMaxWidth().padding(top = 12.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
+                        // IchthysOS: without the service a pause does nothing, so don't start a
+                        // countdown for it.
                         OutlinedButton(
                             onClick = { vm.repo.pause(5) },
+                            enabled = status.live,
                             modifier = Modifier.weight(1f).height(56.dp),
                         ) {
                             Text("Pause 5 min")
                         }
                         OutlinedButton(
                             onClick = { vm.repo.pause(60) },
+                            enabled = status.live,
                             modifier = Modifier.weight(1f).height(56.dp),
                         ) {
                             Text("Pause 1 h")
@@ -324,6 +347,15 @@ fun HomeScreen(
                             style = MaterialTheme.typography.bodySmall,
                             color = t.muted,
                         )
+                        // IchthysOS: lockdown is a firewall rule, so a pause lifts it too.
+                        if (status.lockdown && status.pausedUntil > now) {
+                            Text(
+                                "Not enforced while protection is paused.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = t.danger,
+                                modifier = Modifier.padding(top = 4.dp),
+                            )
+                        }
                     }
                     Switch(
                         checked = status.lockdown,
@@ -349,7 +381,7 @@ fun HomeScreen(
                                 modifier = Modifier.weight(1f),
                             )
                             Text(
-                                "${c.blocked}/${c.hits} · ${c.apps} apps",
+                                "${c.blocked} of ${c.hits} blocked · ${quantity(c.apps, "app")}",
                                 style =
                                     MaterialTheme.typography.labelMedium.copy(fontFamily = t.mono),
                                 color = t.muted,
@@ -382,7 +414,7 @@ fun HomeScreen(
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
-                            Tag("${a.trackerHits} trackers", emphasized = true)
+                            Tag(quantity(a.trackerHits, "tracker contact"), emphasized = true)
                             Tag("${a.blocked} blocked")
                         }
                     }
@@ -397,8 +429,17 @@ fun HomeScreen(
             onDismissRequest = { confirmLockdown = false },
             title = { Text("Turn on lockdown?") },
             text = {
+                // IchthysOS: name the list that will really be used. An allowlist the user emptied
+                // stays empty (it is seeded only once), so "your messaging and phone apps" could
+                // be false.
+                val kept = remember { vm.repo.lockdownAllowlistPreview().size }
                 Text(
-                    "Every app except ${vm.repo.rules.value.lockdown.allowlist.size.takeIf { it > 0 }?.let { "the $it allowlisted" } ?: "your messaging and phone"} apps loses network access until you turn it off."
+                    if (kept > 0)
+                        "Every app Guard lists loses network access until you turn it off, " +
+                            "except ${quantity(kept, "app")} on your allowlist (Rules)."
+                    else
+                        "Every app Guard lists loses network access until you turn it off. " +
+                            "Your allowlist is empty, so no app keeps its network."
                 )
             },
             confirmButton = {

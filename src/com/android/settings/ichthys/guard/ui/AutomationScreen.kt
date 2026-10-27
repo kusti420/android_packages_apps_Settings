@@ -75,6 +75,7 @@ fun AutomationScreen(
     val apps by repo.apps.collectAsStateWithLifecycle()
     val policies by repo.policies.collectAsStateWithLifecycle()
     var message by remember { mutableStateOf<String?>(null) }
+    var checking by remember { mutableStateOf(false) }
     val active = auto.activeProfiles().map { it.id }.toSet()
 
     LazyColumn(
@@ -85,20 +86,14 @@ fun AutomationScreen(
         item {
             TextButton(onClick = onBack) { Text("‹ Back") }
             Text("Automation", style = MaterialTheme.typography.headlineMedium)
-            message?.let {
-                Text(
-                    it,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = t.muted,
-                    modifier = Modifier.padding(top = 4.dp),
-                )
-            }
         }
         item {
             GuardCard(title = "Profiles") {
+                // IchthysOS: a profile can also keep the network on screen only ("Only on
+                // screen"), not just cut it.
                 Text(
-                    "While a profile is on, apps with its tags lose their network. Tag apps on " +
-                        "their page.",
+                    "While a profile is on, apps with its tags lose their network, or keep it " +
+                        "only while on screen. Tag apps on their page.",
                     style = MaterialTheme.typography.bodySmall,
                     color = t.muted,
                 )
@@ -226,18 +221,37 @@ fun AutomationScreen(
                 }
                 // Off by default; a check does nothing while it is off.
                 if (auto.autoTighten) {
+                    // IchthysOS: the check reads usage stats for every app and can take a while;
+                    // show it is running, and put the result here, next to the button, instead of
+                    // at the top of the page.
                     TextButton(
+                        enabled = !checking,
                         onClick = {
+                            checking = true
+                            message = null
                             scope.launch {
-                                val paused = withContext(Dispatchers.IO) { repo.runMaintenance() }
+                                val paused =
+                                    try {
+                                        withContext(Dispatchers.IO) { repo.runMaintenance() }
+                                    } finally {
+                                        checking = false
+                                    }
                                 message =
                                     if (paused.isEmpty()) "No unused apps to pause."
                                     else "Paused: " + paused.joinToString()
                             }
-                        }
+                        },
                     ) {
-                        Text("Check now")
+                        Text(if (checking) "Checking…" else "Check now")
                     }
+                }
+                message?.let {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = t.muted,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
                 }
             }
         }
@@ -289,7 +303,7 @@ private fun ProfileEditor(
                     if (active) Tag("ACTIVE", emphasized = true)
                 }
                 Text(
-                    "${p.windowText} · ${daysText(p.days)} · $taggedApps apps",
+                    "${p.windowText} · ${daysText(p.days)} · ${quantity(taggedApps, "app")}",
                     style = MaterialTheme.typography.labelMedium.copy(fontFamily = t.mono),
                     color = t.muted,
                 )

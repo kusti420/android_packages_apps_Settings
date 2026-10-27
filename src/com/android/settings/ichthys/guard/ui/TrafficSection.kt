@@ -108,6 +108,17 @@ fun TrafficSection(
             events.filter { it.event.timeMs >= since }
         }
     val destinations = remember(rangeEvents) { Insights.topDestinations(rangeEvents, 20) }
+    // IchthysOS: Hosts and Trackers come from the in-memory event window (the newest
+    // GuardRepository.MAX_EVENTS, lost on reboot), not from the whole chosen period. Say so when
+    // the window starts after the period does, so "30 days" isn't read as 30 days.
+    val windowNote =
+        remember(events, rangeEvents, range) {
+            val oldest = events.firstOrNull()?.event?.timeMs
+            if (oldest != null && oldest > range.sinceMs())
+                "From the ${quantity(rangeEvents.size, "event")} still in memory, back to " +
+                    "${formatDateTime(oldest)}. Older events of this period aren't kept."
+            else "From ${quantity(rangeEvents.size, "monitored event")}."
+        }
     val trackerShare =
         remember(rangeEvents) {
             Insights.byApp(rangeEvents)
@@ -202,7 +213,7 @@ fun TrafficSection(
                                     )
                                 }
                                 Row(Modifier.padding(vertical = 2.dp)) {
-                                    Tag(if (d.apps == 1) "1 app" else "${d.apps} apps")
+                                    Tag(quantity(d.apps, "app"))
                                     if (d.tracker != null) Tag(d.tracker, emphasized = true)
                                     if (d.blocked > 0) Tag("${d.blocked} blocked", danger = true)
                                 }
@@ -213,8 +224,9 @@ fun TrafficSection(
                             }
                         }
                     }
+                    // IchthysOS: no roadmap talk ("the BPF accounting phase") in the UI.
                     Text(
-                        "From the last ${events.size} monitored events. Per-destination bytes come with the BPF accounting phase.",
+                        "$windowNote Counts are lookups and connections, not bytes.",
                         style = MaterialTheme.typography.bodySmall,
                         color = t.muted,
                         modifier = Modifier.padding(top = 8.dp),
@@ -266,6 +278,12 @@ fun TrafficSection(
                             }
                         }
                     }
+                    Text(
+                        windowNote,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = t.muted,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
                 }
             }
         }

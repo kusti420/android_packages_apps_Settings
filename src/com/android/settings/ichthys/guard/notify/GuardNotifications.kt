@@ -424,6 +424,9 @@ object GuardNotifications {
         val today = StatsHistory.epochDay(System.currentTimeMillis())
         val history = repo.stats.value
         val week = PeriodReport(history.range(today - 6, today))
+        // IchthysOS: a week without a single recorded event (service missing, or a phone left
+        // off) would be reported as "100/100" with "0 of 0 tracker contacts blocked".
+        if (week.total == 0) return
         val prev = PeriodReport(history.range(today - 13, today - 7))
         val delta = if (prev.total > 0) week.score - prev.score else null
         val text =

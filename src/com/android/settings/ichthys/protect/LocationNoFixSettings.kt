@@ -175,6 +175,17 @@ class LocationNoFixSettings : SettingsPreferenceFragment() {
                 }
             )
         }
+        // IchthysOS: an empty category looked like a page that failed to load.
+        if (rows.isEmpty()) {
+            group.addPreference(
+                Preference(prefContext).apply {
+                    key = KEY_EMPTY
+                    summary = getString(R.string.ichthys_location_nofix_empty)
+                    isSelectable = false
+                    isPersistent = false
+                }
+            )
+        }
         if (scrolledToApp) return
         scrolledToApp = true
         (activity?.intent?.getStringExtra(ARG_PACKAGE) ?: arguments?.getString(ARG_PACKAGE))
@@ -214,6 +225,7 @@ class LocationNoFixSettings : SettingsPreferenceFragment() {
         private const val KEY_INTRO = "ichthys_location_nofix_intro"
         private const val KEY_APPS = "ichthys_location_nofix_apps"
         private const val KEY_APP_PREFIX = "app:"
+        private const val KEY_EMPTY = "ichthys_location_nofix_empty"
         private const val STATE_SCROLLED = "ichthys_location_nofix_scrolled"
     }
 }

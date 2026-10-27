@@ -75,18 +75,34 @@ class GalleryCleanupSettings : SettingsPreferenceFragment() {
         executor.execute {
             GalleryCleanup.apply(context)
             GalleryCleanup.schedule(context)
-            mainHandler.post { if (isAdded) refreshFolders() }
+            postFolders(context)
         }
     }
 
-    /** One switch per folder: on = hidden; off = always show (kept in the list to re-hide). */
+    /**
+     * IchthysOS: the folder list is read on [executor]. hiddenFolders() waits for the lock that
+     * GalleryCleanup.apply() holds while it walks shared storage (also from the clean-up job), so
+     * reading it on the main thread could freeze the page for as long as a scan takes.
+     */
     private fun refreshFolders() {
+        val context = requireContext().applicationContext
+        executor.execute { postFolders(context) }
+    }
+
+    /** Executor thread: reads the folders, then shows them on the main thread. */
+    private fun postFolders(context: android.content.Context) {
+        val hidden = GalleryCleanup.hiddenFolders(context).map { it.relativePath to true }
+        val shown = GalleryCleanup.alwaysShow(context).map { it to false }
+        val rows = (hidden + shown).sortedBy { it.first }
+        mainHandler.post { if (isAdded) bindFolders(rows) }
+    }
+
+    /** One switch per folder: on = hidden; off = always show (kept in the list to re-hide). */
+    private fun bindFolders(rows: List<Pair<String, Boolean>>) {
         val group = findPreference<PreferenceCategory>(KEY_FOLDERS) ?: return
         val context = requireContext().applicationContext
         group.removeAll()
-        val hidden = GalleryCleanup.hiddenFolders(context).map { it.relativePath to true }
-        val shown = GalleryCleanup.alwaysShow(context).map { it to false }
-        for ((path, isHidden) in (hidden + shown).sortedBy { it.first }) {
+        for ((path, isHidden) in rows) {
             group.addPreference(
                 SwitchPreferenceCompat(prefContext).apply {
                     key = "folder:$path"

@@ -38,6 +38,11 @@ class PackageAddedReceiver : BroadcastReceiver() {
         runAsync {
             val repo = GuardRepository.get(context)
             repo.refreshApps()
+            // IchthysOS: the firewall tables were built before this app existed. Push them again
+            // so lockdown, an active profile and the screen-off rule cover the new uid too (and a
+            // reinstalled app gets its saved policy back under its new uid).
+            repo.pushAllNetworkPolicies()
+            repo.pushBehaviours()
             GuardNotifications.notifyNewApp(context, pkg)
             GuardNotifications.markAnnounced(context)
             repo.riskFactsFor(pkg)

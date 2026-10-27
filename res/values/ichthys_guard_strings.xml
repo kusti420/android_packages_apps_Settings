@@ -99,7 +99,8 @@
     <!-- IchthysOS: the two lines below are worded for HostRules.ENFORCED = false (per-app tracker
          rules saved but not applied). Revisit them when host rules are enforced. -->
     <string name="ichthys_guard_advice_trackers_known">Trackers found. Guard can\'t block them per app yet; the system-wide blocklist still stops common ones.</string>
-    <string name="ichthys_guard_advice_trackers_browser">A browser: strict mode would break websites, so the default stays.</string>
+    <!-- IchthysOS: no "strict mode" while per-app tracker rules aren't enforced. -->
+    <string name="ichthys_guard_advice_trackers_browser">A browser: per-app tracker rules would break websites, so the default stays. The system-wide blocklist still applies.</string>
     <string name="ichthys_guard_advice_trackers_none">None found. The system-wide blocklist still applies.</string>
     <string name="ichthys_guard_advice_trackers_unknown">Scan not available yet, so the default stays.</string>
     <string name="ichthys_guard_advice_exceptions_closed">Contacts, clipboard and sensors stay protected until you give it real access.</string>
@@ -109,4 +110,10 @@
     <string name="ichthys_guard_first_launch_customize">Customize</string>
     <string name="ichthys_guard_first_launch_as_is">Open as-is</string>
     <string name="ichthys_guard_first_launch_failed">Couldn\'t release <xliff:g id="app">%1$s</xliff:g></string>
+
+    <!-- IchthysOS: the Settings hub "Protected" card (ShoalProtectedPreference) when some
+         protections are off: names them (comma-separated labels such as "Clipboard lockdown"). -->
+    <string name="ichthys_protected_summary_off">Off: <xliff:g id="protections">%1$s</xliff:g></string>
+    <!-- IchthysOS: the No location page (LocationNoFixSettings) when no app requests location. -->
+    <string name="ichthys_location_nofix_empty">No app you installed asks for your location.</string>
 </resources>

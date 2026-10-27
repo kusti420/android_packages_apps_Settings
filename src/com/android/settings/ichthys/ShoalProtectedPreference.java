@@ -101,8 +101,10 @@ public class ShoalProtectedPreference extends Preference {
         disc.setShape(GradientDrawable.OVAL);
         disc.setColor(accent);
         icon.setBackground(disc);
-        // Dark ink shield-check on the accent disc (#07090b).
-        icon.setImageTintList(ColorStateList.valueOf(0xFF07090B));
+        // Dark ink shield-check on the accent disc (#07090b). IchthysOS: white on a dark accent,
+        // where the ink glyph would all but disappear (0.18 is where the two contrast equally).
+        icon.setImageTintList(ColorStateList.valueOf(
+                Color.luminance(accent) > 0.18f ? 0xFF07090B : 0xFFFFFFFF));
 
         final TextView title = (TextView) holder.findViewById(android.R.id.title);
         final TextView summary = (TextView) holder.findViewById(android.R.id.summary);
@@ -114,8 +116,16 @@ public class ShoalProtectedPreference extends Preference {
         summary.setMaxLines(3);
         title.setText(on == all.size() ? c.getString(R.string.ichthys_protected_title)
                 : c.getString(R.string.ichthys_protected_partial, on, all.size()));
+        // IchthysOS: name what is off. "Tap to review what's off" sent people to Guard, which has
+        // no row for the keystore or the hosts-file blocklist, and the chips are hidden from
+        // TalkBack, so it never heard which ones were off.
+        final List<String> offLabels = new java.util.ArrayList<>();
+        for (ShoalStyle.Protection p : all) {
+            if (!p.on) offLabels.add(p.label);
+        }
         summary.setText(on == all.size() ? c.getString(R.string.ichthys_protected_summary)
-                : c.getString(R.string.ichthys_protected_summary_partial));
+                : c.getString(R.string.ichthys_protected_summary_off,
+                        String.join(", ", offLabels)));
         // Title 15sp semibold, summary 13sp (#c9ceca on ink), both in the body font.
         title.setTypeface(ShoalStyle.text(c, 600));
         title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f);

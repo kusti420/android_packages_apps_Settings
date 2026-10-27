@@ -27,8 +27,10 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -64,10 +66,12 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.android.settings.ichthys.guard.data.GuardRepository
 import com.android.settings.ichthys.guard.model.ActivityFilter
 import com.android.settings.ichthys.guard.model.EventType
+import com.android.settings.ichthys.guard.model.GuardEvent
 import com.android.settings.ichthys.guard.model.Grouping
 import com.android.settings.ichthys.guard.model.HostRules
 import com.android.settings.ichthys.guard.model.Insights
 import com.android.settings.ichthys.guard.model.LabeledEvent
+import com.android.settings.ichthys.guard.model.NetworkAccess
 import com.android.settings.ichthys.guard.model.RuleEngine
 import com.android.settings.ichthys.guard.model.Verdict
 import com.android.settings.ichthys.guard.model.VerdictSource
@@ -80,6 +84,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** Live log state: filter, grouping and a pausable (frozen) view of the live stream. */
 class ActivityViewModel(app: Application) : AndroidViewModel(app) {
@@ -211,6 +216,7 @@ private fun LiveLog(
     val newCount by avm.newWhilePaused.collectAsStateWithLifecycle()
     val visible by avm.visible.collectAsStateWithLifecycle()
     val apps by avm.appsInEvents.collectAsStateWithLifecycle()
+    val status by vm.status.collectAsStateWithLifecycle()
     val t = Guard.tokens
 
     var selected by remember { mutableStateOf<LabeledEvent?>(null) }
@@ -222,13 +228,26 @@ private fun LiveLog(
         rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri
             ->
             if (uri != null) {
-                val csv = Insights.toCsv(visible.reversed())
-                exportScope.launch(Dispatchers.IO) {
-                    runCatching {
-                        exportCtx.contentResolver.openOutputStream(uri)?.use {
-                            it.write(csv.toByteArray())
+                val rows = visible.reversed()
+                val csv = Insights.toCsv(rows)
+                // IchthysOS: the export used to fail silently; say how it went.
+                exportScope.launch {
+                    val ok =
+                        withContext(Dispatchers.IO) {
+                            runCatching {
+                                    exportCtx.contentResolver.openOutputStream(uri, "wt")!!.use {
+                                        it.write(csv.toByteArray())
+                                    }
+                                }
+                                .isSuccess
                         }
-                    }
+                    Toast.makeText(
+                            exportCtx,
+                            if (ok) "Exported ${quantity(rows.size, "event")}"
+                            else "Export failed",
+                            Toast.LENGTH_SHORT,
+                        )
+                        .show()
                 }
             }
         }
@@ -237,10 +256,11 @@ private fun LiveLog(
         Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
+                    // IchthysOS: this pauses the list only, not protection; say "log".
                     when {
-                        !paused -> "${visible.size} events"
-                        newCount > 0 -> "Paused · $newCount new"
-                        else -> "Paused"
+                        !paused -> quantity(visible.size, "event")
+                        newCount > 0 -> "Log paused · $newCount new"
+                        else -> "Log paused"
                     },
                     style = MaterialTheme.typography.labelMedium.copy(fontFamily = t.mono),
                     color = t.muted,
@@ -253,7 +273,7 @@ private fun LiveLog(
                     Text("Export")
                 }
                 FilledTonalButton(onClick = { avm.setPaused(!paused) }) {
-                    Text(if (paused) "Resume" else "Pause")
+                    Text(if (paused) "Resume log" else "Pause log")
                 }
             }
             OutlinedTextField(
@@ -309,8 +329,13 @@ private fun LiveLog(
         if (visible.isEmpty()) {
             Box(Modifier.fillMaxSize().padding(24.dp)) {
                 Text(
-                    if (filter.isActive) "Nothing matches these filters."
-                    else "No network activity yet.",
+                    when {
+                        filter.isActive -> "Nothing matches these filters."
+                        // IchthysOS: the log comes from the service; without it, it stays empty.
+                        !status.live ->
+                            "No live activity: the Guard platform service isn't reachable."
+                        else -> "No network activity yet."
+                    },
                     style = MaterialTheme.typography.bodyMedium,
                     color = t.muted,
                 )
@@ -413,8 +438,9 @@ private fun GroupHeader(g: EventGroup, open: Boolean, onToggle: () -> Unit) {
                 overflow = TextOverflow.Ellipsis,
             )
             Row(Modifier.padding(top = 2.dp)) {
-                Tag("${g.events.size} events")
-                if (g.trackerHits > 0) Tag("${g.trackerHits} tracker", emphasized = true)
+                Tag(quantity(g.events.size, "event"))
+                if (g.trackerHits > 0)
+                    Tag(quantity(g.trackerHits, "tracker contact"), emphasized = true)
                 if (g.blocked > 0) Tag("${g.blocked} blocked", danger = true)
             }
         }
@@ -464,20 +490,37 @@ private fun EventActions(
         )
         // IchthysOS: what happened to this event comes from the event itself (the firewall or the
         // hosts file); the verdict line explains what the current rules would do.
+        val sinkholed = e.isSinkholed()
         if (e.event.blocked) {
             Text(
-                "This one was blocked",
+                if (sinkholed) "This one was blocked by the system-wide blocklist"
+                else "This one was blocked by the firewall",
                 style = MaterialTheme.typography.bodyMedium,
                 color = t.danger,
                 modifier = Modifier.padding(top = 12.dp),
             )
         }
+        // IchthysOS: the hosts file answers this name with a sinkhole for every app, so "Allowed:
+        // no rule matches" would contradict the line above.
+        val blockedNext = verdict.blocked || sinkholed
         Text(
-            verdictText(verdict, tracker?.name),
+            if (!verdict.blocked && sinkholed) SYSTEM_BLOCKLIST_VERDICT
+            else verdictText(verdict, tracker?.name),
             style = MaterialTheme.typography.bodyMedium,
-            color = if (verdict.blocked) t.danger else t.accent,
-            modifier = Modifier.padding(vertical = 12.dp),
+            color = if (blockedNext) t.danger else t.accent,
+            modifier = Modifier.padding(top = 12.dp),
         )
+        // IchthysOS: the verdict covers host rules and blocks; a Wi-Fi-only app is also cut off on
+        // mobile data, which "Allowed" alone would hide.
+        val access = pkg?.let { repo.effectiveAccess(it) }
+        if (!blockedNext && access == NetworkAccess.UNMETERED_ONLY) {
+            Text(
+                "Wi-Fi only: on mobile data this app has no network.",
+                style = MaterialTheme.typography.bodySmall,
+                color = t.muted,
+            )
+        }
+        Spacer(Modifier.height(12.dp))
         if (host.isNotEmpty()) {
             ActionRow("Every app that reached ${e.event.destination}") {
                 dismiss()
@@ -529,6 +572,13 @@ private fun ActionRow(label: String, onClick: () -> Unit) {
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 12.dp),
     )
 }
+
+/** IchthysOS: the system hosts file (HaGeZi) answered this lookup or connect with a sinkhole. */
+fun LabeledEvent.isSinkholed(): Boolean = GuardEvent.isSinkholed(event.type, event.ips, event.ip)
+
+/** IchthysOS: the verdict line for a destination the system hosts file blocks for every app. */
+const val SYSTEM_BLOCKLIST_VERDICT =
+    "Blocked by the system-wide blocklist (HaGeZi Light), for every app"
 
 /**
  * Human explanation of a [Verdict] ("Would be blocked: this app has no network access"). A rule

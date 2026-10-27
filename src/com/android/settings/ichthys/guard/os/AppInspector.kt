@@ -191,6 +191,11 @@ class AppInspector(private val context: Context) {
         } catch (e: SecurityException) {
             Log.i(TAG, "app ops history denied", e)
             null
+        } catch (e: RuntimeException) {
+            // IchthysOS: the reflection reads hidden API shapes (casts, nulls); a change there
+            // must show the "isn't readable" hint, not crash the app page's loader.
+            Log.w(TAG, "app ops history unreadable", e)
+            null
         }
 
     /**

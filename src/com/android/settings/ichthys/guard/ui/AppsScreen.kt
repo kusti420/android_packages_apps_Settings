@@ -132,10 +132,27 @@ fun AppsScreen(vm: GuardViewModel, onOpenApp: (String) -> Unit, modifier: Modifi
                     Chip("System apps", showSystem) { showSystem = !showSystem }
                 }
                 Text(
-                    "${shown.size} apps",
+                    quantity(shown.size, "app"),
                     style = MaterialTheme.typography.labelSmall.copy(fontFamily = t.mono),
                     color = t.muted,
                     modifier = Modifier.padding(top = 4.dp),
+                )
+            }
+        }
+        // IchthysOS: an empty list said only "0 apps". Say whether the list is still loading or
+        // the search and filter leave nothing.
+        if (shown.isEmpty()) {
+            item {
+                Text(
+                    when {
+                        apps.isEmpty() -> "Loading apps…"
+                        query.isNotBlank() -> "No app matches \"${query.trim()}\"."
+                        filter != AppFilter.ALL -> "No app fits this filter."
+                        else -> "No apps to show. Turn on System apps to see them."
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = t.muted,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                 )
             }
         }
@@ -163,7 +180,7 @@ fun AppsScreen(vm: GuardViewModel, onOpenApp: (String) -> Unit, modifier: Modifi
                             policy.network != NetworkAccess.DENY
                     )
                         Tag("LOCKDOWN", danger = true)
-                    if (trackerHosts > 0) Tag("$trackerHosts trackers", emphasized = true)
+                    if (trackerHosts > 0) Tag(quantity(trackerHosts, "tracker"), emphasized = true)
                     if (policy.dormant) Tag("PAUSED", danger = true)
                     riskOf(app.packageName)?.let { r ->
                         Tag(
@@ -180,7 +197,7 @@ fun AppsScreen(vm: GuardViewModel, onOpenApp: (String) -> Unit, modifier: Modifi
                 )
                 if (evs.isNotEmpty()) {
                     Text(
-                        "${evs.size} events · last ${formatAgo(evs.last().event.timeMs)}",
+                        "${quantity(evs.size, "event")} · last ${formatAgo(evs.last().event.timeMs)}",
                         style = MaterialTheme.typography.labelSmall.copy(fontFamily = t.mono),
                         color = t.muted,
                     )

@@ -66,6 +66,9 @@ fun DestinationScreen(
     val hits = remember(events, destination) { events.filter { it.event.destination == destination } }
     val apps = remember(hits, destination) { Insights.appsForDestination(hits, destination) }
     val tracker = remember(destination) { repo.matcher.match(destination) }
+    // IchthysOS: the system hosts file sinkholes this name for every app; the rule verdicts below
+    // know nothing of it and would call it "ALLOWED".
+    val sinkholed = remember(hits) { hits.any { it.isSinkholed() } }
     val pattern = HostPattern.normalize(destination)
     val globalRule =
         rules.rules.firstOrNull {
@@ -90,6 +93,7 @@ fun DestinationScreen(
                 } else {
                     Tag("not a known tracker")
                 }
+                if (sinkholed) Tag("system blocklist", danger = true)
                 globalRule?.let {
                     // IchthysOS: a saved rule, not a block, until host rules are enforced.
                     Tag(
@@ -107,7 +111,7 @@ fun DestinationScreen(
         item {
             GuardCard {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Stat("${hits.size}", "events")
+                    Stat("${hits.size}", if (hits.size == 1) "event" else "events")
                     Stat("${apps.size}", if (apps.size == 1) "app" else "apps")
                     Stat(
                         "${hits.count { it.event.blocked }}",
@@ -193,21 +197,29 @@ fun DestinationScreen(
                             overflow = TextOverflow.Ellipsis,
                         )
                         Text(
-                            "${a.hits} events · last ${formatAgo(a.lastSeenMs)}",
+                            "${quantity(a.hits, "event")} · last ${formatAgo(a.lastSeenMs)}",
                             style = MaterialTheme.typography.labelMedium.copy(fontFamily = t.mono),
                             color = t.muted,
                         )
                     }
+                    val blocked = verdict.blocked || sinkholed
                     Text(
-                        if (verdict.blocked) "BLOCKED" else "ALLOWED",
+                        if (blocked) "BLOCKED" else "ALLOWED",
                         style = MaterialTheme.typography.labelMedium.copy(fontFamily = t.mono),
-                        color = if (verdict.blocked) t.danger else t.muted,
+                        color = if (blocked) t.danger else t.muted,
                     )
                 }
-                Row(Modifier.padding(top = 4.dp)) {
-                    if (a.blocked > 0) Tag("${a.blocked} blocked", danger = true)
-                    Tag(verdictText(verdict, tracker?.name))
+                if (a.blocked > 0) {
+                    Row(Modifier.padding(top = 4.dp)) { Tag("${a.blocked} blocked", danger = true) }
                 }
+                // IchthysOS: a sentence, not a one-line Tag (which clipped it mid-word).
+                Text(
+                    if (!verdict.blocked && sinkholed) SYSTEM_BLOCKLIST_VERDICT
+                    else verdictText(verdict, tracker?.name),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = t.muted,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
                 if (pkg != null) {
                     Row {
                         if (hasOwnEntry) {

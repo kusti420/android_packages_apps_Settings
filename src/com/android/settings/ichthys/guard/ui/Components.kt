@@ -311,6 +311,10 @@ fun formatClock(ms: Long): String = synchronized(clockFormat) { clockFormat.form
 fun formatDateTime(ms: Long): String =
     DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(ms))
 
+/** IchthysOS: "1 app", "3 apps": counts on Guard's pages read as English, not "1 apps". */
+fun quantity(n: Int, one: String, other: String = one + "s"): String =
+    "$n ${if (n == 1) one else other}"
+
 fun formatBytes(b: Long): String =
     when {
         b >= 1L shl 30 -> "%.1f GB".format(b / (1L shl 30).toDouble())

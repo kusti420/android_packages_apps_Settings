@@ -62,7 +62,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 private data class ScanResult(
-    val trackers: List<String>,
+    /** IchthysOS: null while the install scan is unknown (pending, or no service). */
+    val trackers: List<String>?,
     val local: LocalScan?,
     val usage: List<OpUsage>?,
 )
@@ -90,7 +91,7 @@ fun AppDetailScreen(
             value =
                 withContext(Dispatchers.IO) {
                     ScanResult(
-                        repo.backend.getScan(packageName).orEmpty(),
+                        repo.backend.getScan(packageName),
                         repo.inspector.localScan(packageName),
                         app?.let { repo.inspector.permissionUsage(it) },
                     )
@@ -174,6 +175,17 @@ fun AppDetailScreen(
                             "${risk.level} risk",
                             Modifier.weight(1f),
                             color = if (risk.isHigh) t.danger else t.text,
+                        )
+                    }
+                    // IchthysOS: without the install scan the embedded trackers aren't counted,
+                    // so a "Low" score here may only mean "not scanned yet".
+                    if (f.trackers == null) {
+                        Text(
+                            "Tracker scan not available yet, so embedded trackers aren't " +
+                                "counted in this score.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = t.muted,
+                            modifier = Modifier.padding(bottom = 4.dp),
                         )
                     }
                     for (factor in risk.factors.sortedByDescending { it.points }) {
@@ -299,7 +311,11 @@ fun AppDetailScreen(
                     onSelect = { l -> update { it.copy(localNetwork = l) } },
                 )
                 Text(
-                    when (lanDenied) {
+                    // IchthysOS: without the service isLanDenied() falls back to false, which
+                    // would read as "can reach devices"; say it is unknown instead.
+                    if (!status.live) "Devices on your Wi-Fi: unknown while the Guard service " +
+                        "isn't reachable."
+                    else when (lanDenied) {
                         null -> "Devices on your Wi-Fi: checking…"
                         true ->
                             if (policy.localNetwork == LocalNetwork.DEFAULT)
@@ -387,19 +403,31 @@ fun AppDetailScreen(
                 if (s == null) {
                     Text("Scanning…", color = t.muted)
                 } else {
-                    Text(
-                        "${s.trackers.size} tracker SDKs embedded",
-                        style = MaterialTheme.typography.titleMedium,
-                    )
-                    if (s.trackers.isNotEmpty())
+                    // IchthysOS: a missing scan used to read "0 tracker SDKs embedded".
+                    val trackers = s.trackers
+                    if (trackers == null) {
                         Text(
-                            s.trackers.joinToString(" · "),
+                            if (status.live) "Tracker scan not finished yet"
+                            else "Tracker scan unavailable: the Guard service isn't reachable",
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                    } else {
+                        Text(
+                            if (trackers.isEmpty()) "No known tracker SDKs embedded"
+                            else "${quantity(trackers.size, "tracker SDK")} embedded",
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                    }
+                    if (!trackers.isNullOrEmpty())
+                        Text(
+                            trackers.joinToString(" · "),
                             style = MaterialTheme.typography.bodySmall,
                             color = t.muted,
                         )
                     s.local?.let { l ->
                         Text(
-                            "${l.dangerousPermissions.size} dangerous permissions requested",
+                            "${quantity(l.dangerousPermissions.size, "dangerous permission")} " +
+                                "requested",
                             style = MaterialTheme.typography.titleMedium,
                             modifier = Modifier.padding(top = 8.dp),
                         )

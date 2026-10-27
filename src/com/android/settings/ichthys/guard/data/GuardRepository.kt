@@ -560,6 +560,17 @@ class GuardRepository(
         scope.launch { pushAllNetworkPolicies() }
     }
 
+    /**
+     * IchthysOS: the allowlist [setLockdown] (true) would use right now (the seeded defaults on
+     * the very first lockdown, the user's list after that), so the confirmation names the apps
+     * that really keep their network instead of assuming the defaults.
+     */
+    fun lockdownAllowlistPreview(): Set<String> {
+        val lock = _rules.value.lockdown
+        val seeded = prefs.getBoolean(KEY_LOCKDOWN_SEEDED, false)
+        return if (lock.allowlist.isEmpty() && !seeded) defaultLockdownAllowlist() else lock.allowlist
+    }
+
     fun setLockdownAllowed(pkg: String, allowed: Boolean) {
         val lock = _rules.value.lockdown
         // The user is choosing the list; never replace it with the defaults afterwards.

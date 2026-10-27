@@ -104,7 +104,7 @@ fun RulesScreen(
                             }
                             "Exported rules and app settings"
                         } catch (e: Exception) {
-                            "Export failed: ${e.message}"
+                            "Export failed: ${e.message ?: e.javaClass.simpleName}"
                         }
                 }
         }
@@ -121,11 +121,14 @@ fun RulesScreen(
                                     }
                                 }
                             val n = withContext(Dispatchers.Default) { repo.importJson(text) }
-                            "Imported $n rules"
+                            // IchthysOS: a backup also carries every app's settings; "Imported 0
+                            // rules" read as if nothing happened.
+                            "Backup imported: ${quantity(n, "custom rule")} and the app " +
+                                "settings in it"
                         } catch (e: IllegalArgumentException) {
                             e.message ?: "Not a Guard rules file"
                         } catch (e: Exception) {
-                            "Import failed: ${e.message}"
+                            "Import failed: ${e.message ?: e.javaClass.simpleName}"
                         }
                 }
         }
@@ -157,8 +160,11 @@ fun RulesScreen(
                             style = MaterialTheme.typography.bodyLarge,
                         )
                         Text(
-                            if (active.isEmpty()) "${auto.profiles.count { it.enabled }} profiles on"
-                            else "Active now: " + active.joinToString { it.name },
+                            if (active.isNotEmpty()) "Active now: " + active.joinToString { it.name }
+                            else
+                                auto.profiles.count { it.enabled }.let { on ->
+                                    if (on == 0) "No profile on" else "${quantity(on, "profile")} on"
+                                },
                             style = MaterialTheme.typography.bodySmall,
                             color = Guard.tokens.muted,
                         )
@@ -453,8 +459,12 @@ fun RulesScreen(
 
         item {
             GuardCard(title = "Backup") {
+                // IchthysOS: blocklist sources are hidden while host rules aren't enforced.
                 Text(
-                    "Export saves custom rules, sources, lockdown and every app's settings as JSON. Import merges: imported rules replace ones with the same app and pattern.",
+                    (if (HostRules.ENFORCED)
+                        "Export saves custom rules, sources, lockdown and every app's settings as JSON."
+                    else "Export saves custom rules, lockdown and every app's settings as JSON.") +
+                        " Import merges: imported rules replace ones with the same app and pattern.",
                     style = MaterialTheme.typography.bodySmall,
                     color = Guard.tokens.muted,
                 )

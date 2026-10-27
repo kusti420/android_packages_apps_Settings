@@ -90,8 +90,13 @@ public class UsageAccessDetails extends AppInfoWithHeader implements OnPreferenc
         mUsageDesc.setTitle(R.string.usage_access_description);
 
         mSwitchPref.setOnPreferenceChangeListener(this);
-        mFullHistoryPref =
-                IchthysUsageHistory.addSwitch(getPreferenceScreen(), mPackageName, mUserId);
+        // IchthysOS: the activity is exported, so it can be opened with no package (no data
+        // URI). addSwitch() takes a non-null Kotlin String and would throw; refreshUi() then
+        // finds no app entry and closes the page, as stock does.
+        if (mPackageName != null) {
+            mFullHistoryPref =
+                    IchthysUsageHistory.addSwitch(getPreferenceScreen(), mPackageName, mUserId);
+        }
 
         mSettingsIntent = new Intent(Intent.ACTION_MAIN)
                 .addCategory(Settings.INTENT_CATEGORY_USAGE_ACCESS_CONFIG)
