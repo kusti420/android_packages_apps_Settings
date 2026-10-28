@@ -448,6 +448,15 @@ class GuardRepository(
             val f = behaviourFlags(app)
             if (f != 0) table[app.uid] = (table[app.uid] ?: 0) or f
         }
+        // IchthysOS: and the installed apps with a stored rule that left the list (see
+        // pushAllNetworkPolicies).
+        val listed = _apps.value.mapTo(HashSet()) { it.packageName }
+        for (pkg in _policies.value.policies.keys) {
+            if (pkg in listed) continue
+            val app = inspector.app(pkg) ?: continue
+            val f = behaviourFlags(app)
+            if (f != 0) table[app.uid] = (table[app.uid] ?: 0) or f
+        }
         backend.replaceBehaviours(table)
     }
 
@@ -459,6 +468,17 @@ class GuardRepository(
             val want = effectiveAccess(app.packageName)
             if (want == NetworkAccess.ALLOW) continue
             // Several packages can share a uid; the strictest wins.
+            val prev = table[app.uid]
+            if (prev == null || want.ordinal > prev.ordinal) table[app.uid] = want
+        }
+        // IchthysOS: a stored rule also holds for an installed app that left the list (a system
+        // app whose launcher icon was hidden, microG for one); the replace would drop it.
+        val listed = _apps.value.mapTo(HashSet()) { it.packageName }
+        for ((pkg, policy) in _policies.value.policies) {
+            if (pkg in listed) continue
+            val want = if (policy.dormant) NetworkAccess.DENY else policy.network
+            if (want == NetworkAccess.ALLOW) continue
+            val app = inspector.app(pkg) ?: continue
             val prev = table[app.uid]
             if (prev == null || want.ordinal > prev.ordinal) table[app.uid] = want
         }
