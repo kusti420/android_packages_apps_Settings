@@ -74,6 +74,7 @@ import java.security.MessageDigest
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -108,7 +109,12 @@ class GuardRepository(
     private val statsStore: StatsStore = StatsStore(dataDir),
     private val automationStore: AutomationStore = AutomationStore(dataDir),
 ) {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    // A failing job (a package that can't be read, a store that throws) is logged, not fatal:
+    // uncaught, it would take the whole Settings process down.
+    private val scope =
+        CoroutineScope(
+            SupervisorJob() + Dispatchers.Default +
+                CoroutineExceptionHandler { _, e -> Log.w(TAG, "guard job failed", e) })
     private val prefs: SharedPreferences =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 

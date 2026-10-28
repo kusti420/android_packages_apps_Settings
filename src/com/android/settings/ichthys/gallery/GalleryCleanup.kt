@@ -297,7 +297,13 @@ object GalleryCleanup {
     private fun loadState(context: Context): List<HiddenFolder> {
         val file = File(context.filesDir, STATE_FILE)
         if (!file.isFile) return emptyList()
-        return file.readLines().mapNotNull { line ->
+        val lines =
+            try {
+                file.readLines()
+            } catch (e: IOException) {
+                return emptyList()
+            }
+        return lines.mapNotNull { line ->
             val (category, path) = line.split('\t', limit = 2).takeIf { it.size == 2 }
                 ?: return@mapNotNull null
             val c = Category.values().firstOrNull { it.name == category } ?: return@mapNotNull null

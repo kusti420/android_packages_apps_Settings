@@ -137,6 +137,9 @@ class AppInspector(private val context: Context) {
             LocalScan(dangerous.sorted(), comps.count { it }, comps.size)
         } catch (ignored: PackageManager.NameNotFoundException) {
             null
+        } catch (e: RuntimeException) {
+            // A huge app's full component list can overflow the binder (TransactionTooLarge).
+            null
         }
 
     /**

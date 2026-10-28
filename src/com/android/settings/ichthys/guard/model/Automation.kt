@@ -231,6 +231,7 @@ data class AutomationSettings(
     companion object {
         private val json = Json {
             ignoreUnknownKeys = true
+            coerceInputValues = true
             encodeDefaults = false
         }
 

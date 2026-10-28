@@ -30,6 +30,7 @@ import android.os.UserManager
 import android.provider.Settings
 import android.util.Log
 import com.android.settings.R
+import com.android.settings.ichthys.guard.os.ShieldSwitch
 import com.android.settings.ichthys.guard.data.GuardRepository
 import com.android.settings.ichthys.guard.model.AlertType
 import com.android.settings.ichthys.guard.model.HostRules
@@ -291,9 +292,11 @@ object GuardNotifications {
         val label =
             try {
                 val pm = ctx.packageManager
-                pm.getApplicationInfo(pkg, PackageManager.ApplicationInfoFlags.of(0))
-                    .loadLabel(pm)
-                    .toString()
+                val info = pm.getApplicationInfo(pkg, PackageManager.ApplicationInfoFlags.of(0))
+                // IchthysOS: preinstalled parts of the OS (APEX apps re-scanned after a restart,
+                // RemoteProvisioner and friends) are not news: only apps the user installed.
+                if ((info.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0) return
+                info.loadLabel(pm).toString()
             } catch (ignored: PackageManager.NameNotFoundException) {
                 return
             }
@@ -310,7 +313,16 @@ object GuardNotifications {
             } else {
                 "scan pending"
             }
-        val title = "$label installed · $scanText · Shielded"
+        // What the OS shields actually are right now (each can be switched off in Guard).
+        val resolver = ctx.contentResolver
+        val locked =
+            listOfNotNull(
+                "contacts".takeIf { ShieldSwitch.CONTACTS.isOn(resolver) },
+                "clipboard".takeIf { ShieldSwitch.CLIPBOARD.isOn(resolver) },
+            )
+        val title =
+            if (locked.isEmpty()) "$label installed · $scanText"
+            else "$label installed · $scanText · Shielded"
         // IchthysOS: per-app tracker rules aren't enforced yet (HostRules), so the text doesn't
         // claim blocks and the "Strict" button is left out until they are.
         val trackerLine =
@@ -318,7 +330,11 @@ object GuardNotifications {
             else "The system-wide blocklist stops common trackers."
         val body =
             if (trackers.isEmpty()) {
-                "Monitored, contacts and clipboard locked. $trackerLine"
+                when (locked.size) {
+                    0 -> "Monitored. $trackerLine"
+                    1 -> "Monitored, ${locked[0]} locked. $trackerLine"
+                    else -> "Monitored, contacts and clipboard locked. $trackerLine"
+                }
             } else {
                 "Embeds: ${trackers.joinToString()}. $trackerLine"
             }

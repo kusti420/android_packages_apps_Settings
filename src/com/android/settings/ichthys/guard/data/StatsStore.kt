@@ -30,7 +30,10 @@ class StatsStore(dir: File) {
             StatsHistory.fromJson(String(file.readFully(), Charsets.UTF_8))
         } catch (ignored: IOException) {
             StatsHistory()
-        } catch (ignored: IllegalArgumentException) {
+        } catch (e: IllegalArgumentException) {
+            // A file this build can't read (an option renamed or removed since it was saved):
+            // keep a copy before the defaults replace it on the next save.
+            keepUnreadable()
             StatsHistory()
         }
 
@@ -42,6 +45,15 @@ class StatsStore(dir: File) {
         } catch (e: IOException) {
             file.failWrite(out)
             throw e
+        }
+    }
+
+    private fun keepUnreadable() {
+        val bad = File(file.baseFile.path + ".unreadable")
+        try {
+            if (!bad.exists()) file.baseFile.copyTo(bad, overwrite = false)
+        } catch (ignored: IOException) {
+            // No room for the copy: the defaults still beat a crash.
         }
     }
 }

@@ -196,6 +196,10 @@ class LockdownControlReceiver : BroadcastReceiver() {
                         repo.setLockdown(intent.getBooleanExtra(EXTRA_ENABLED, false))
                     }
                     pending.resultCode = if (repo.rules.value.lockdown.enabled) 1 else 0
+                } catch (e: Exception) {
+                    // The tile shows "off" rather than Settings crashing on its broadcast.
+                    android.util.Log.w("IchthysGuard", "lockdown broadcast failed", e)
+                    pending.resultCode = 0
                 } finally {
                     pending.finish()
                 }

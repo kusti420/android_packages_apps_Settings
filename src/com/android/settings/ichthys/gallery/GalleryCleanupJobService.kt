@@ -26,10 +26,16 @@ import android.content.Intent
 class GalleryCleanupJobService : JobService() {
     override fun onStartJob(params: JobParameters): Boolean {
         Thread {
-                GalleryCleanup.apply(applicationContext)
-                // Content-triggered jobs fire once; arm the next one.
-                GalleryCleanup.schedule(applicationContext)
-                jobFinished(params, false)
+                try {
+                    GalleryCleanup.apply(applicationContext)
+                    // Content-triggered jobs fire once; arm the next one.
+                    GalleryCleanup.schedule(applicationContext)
+                } catch (e: Exception) {
+                    // Storage that can't be read: try again on the next change, don't crash.
+                    android.util.Log.w("GalleryCleanup", "clean-up job failed", e)
+                } finally {
+                    jobFinished(params, false)
+                }
             }
             .start()
         return true
@@ -47,6 +53,8 @@ class GalleryCleanupBootReceiver : BroadcastReceiver() {
                 try {
                     GalleryCleanup.apply(context)
                     GalleryCleanup.schedule(context)
+                } catch (e: Exception) {
+                    android.util.Log.w("GalleryCleanup", "clean-up after boot failed", e)
                 } finally {
                     pending.finish()
                 }

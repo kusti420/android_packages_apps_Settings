@@ -95,7 +95,10 @@ data class StatsHistory(
     fun toJson(): String = json.encodeToString(serializer(), this)
 
     companion object {
-        private val json = Json { ignoreUnknownKeys = true }
+        private val json = Json {
+            ignoreUnknownKeys = true
+            coerceInputValues = true
+        }
 
         fun fromJson(text: String): StatsHistory = json.decodeFromString(serializer(), text)
 

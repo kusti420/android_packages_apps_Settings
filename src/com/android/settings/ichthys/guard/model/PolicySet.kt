@@ -40,6 +40,7 @@ data class PolicySet(val policies: Map<String, AppPolicy> = emptyMap()) {
     companion object {
         private val json = Json {
             ignoreUnknownKeys = true
+            coerceInputValues = true
             encodeDefaults = false
         }
 
