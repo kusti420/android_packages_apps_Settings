@@ -317,8 +317,9 @@ private val SHIELDS =
         ),
         Shield(
             "UWB ranging",
-            "Can't measure distance to nearby devices",
-            "Can measure distance to nearby devices",
+            // IchthysOS: UWB only; Bluetooth channel sounding and Wi-Fi RTT aren't covered.
+            "Can't measure distance to nearby devices over UWB",
+            "Can measure distance to nearby devices over UWB",
             listOf("ichthys_uwb_pkgs"),
             true,
             listOf(Manifest.permission.UWB_RANGING, "android.permission.RANGING"),
