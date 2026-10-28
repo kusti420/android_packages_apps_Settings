@@ -68,6 +68,9 @@ interface GuardBackend {
     /** True when [uid]'s local network is blocked (explicitly, or as an app new since setup). */
     fun isLanDenied(uid: Int): Boolean
 
+    /** False for a system-critical [uid] the service won't block (telephony, network stack). */
+    fun isRestrictable(uid: Int): Boolean
+
     /** Which [com.android.settings.ichthys.guard.model.AlertType] bits the service reports. */
     fun setAlertMask(mask: Int)
 }

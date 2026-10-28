@@ -88,6 +88,7 @@ fun AppDetailScreen(
     val events = byApp[packageName].orEmpty()
     val scan by
         produceState<ScanResult?>(null, packageName) {
+            value = null
             value =
                 withContext(Dispatchers.IO) {
                     ScanResult(
@@ -102,6 +103,8 @@ fun AppDetailScreen(
     val scope = rememberCoroutineScope()
     val facts by
         produceState(repo.riskFacts.value[packageName], packageName) {
+            // produceState keeps its value when the key changes: start from this app's.
+            value = repo.riskFacts.value[packageName]
             if (value == null)
                 value = withContext(Dispatchers.IO) { repo.riskFactsFor(packageName) }
         }
@@ -111,6 +114,15 @@ fun AppDetailScreen(
             kotlinx.coroutines.delay(400) // the behaviour push is asynchronous
             value =
                 app?.let { a -> withContext(Dispatchers.IO) { repo.backend.isLanDenied(a.uid) } }
+        }
+    // IchthysOS: telephony and network-stack apps can't be blocked (the service refuses it);
+    // shown as such, not as a Block that does nothing.
+    val restrictable by
+        produceState(true, packageName) {
+            value = true
+            value =
+                app?.let { a -> withContext(Dispatchers.IO) { repo.backend.isRestrictable(a.uid) } }
+                    ?: true
         }
     var confirmReset by remember { mutableStateOf(false) }
     var resetMessage by remember { mutableStateOf<String?>(null) }
@@ -224,17 +236,37 @@ fun AppDetailScreen(
             GuardCard(title = "Network access") {
                 Segmented(
                     NetworkAccess.entries,
-                    policy.network,
+                    if (restrictable) policy.network else NetworkAccess.ALLOW,
                     label = {
                         when (it) {
                             NetworkAccess.ALLOW -> "Allow"
-                            NetworkAccess.UNMETERED_ONLY -> "Wi-Fi only"
+                            NetworkAccess.UNMETERED_ONLY -> "Unmetered"
                             NetworkAccess.DENY -> "Block"
                         }
                     },
                     onSelect = { a -> update { it.copy(network = a) } },
+                    enabled = restrictable,
                 )
-                if (app?.isSystem == true && policy.network == NetworkAccess.DENY) {
+                if (!restrictable) {
+                    Text(
+                        "This system app keeps its network: calls, messages and the connection " +
+                            "itself depend on it.",
+                        color = t.muted,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
+                }
+                // IchthysOS: the rule is the metered firewall, not the network's type.
+                if (restrictable && policy.network == NetworkAccess.UNMETERED_ONLY) {
+                    Text(
+                        "Only on networks that aren't metered, usually Wi-Fi. Mobile data and " +
+                            "metered Wi-Fi (a phone's hotspot) are blocked.",
+                        color = t.muted,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
+                }
+                if (restrictable && app?.isSystem == true && policy.network == NetworkAccess.DENY) {
                     Text(
                         "Blocking a system app can break the OS.",
                         color = t.danger,
@@ -251,7 +283,8 @@ fun AppDetailScreen(
                     )
             }
         }
-        item {
+        // The service skips behaviours of the apps it won't block, too (see Network access).
+        if (restrictable) item {
             GuardCard(title = "Network behaviour") {
                 val ruleCovers =
                     auto.screenOffAll &&

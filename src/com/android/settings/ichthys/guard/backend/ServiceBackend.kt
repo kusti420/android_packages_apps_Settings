@@ -132,6 +132,8 @@ class ServiceBackend : GuardBackend {
 
     override fun isLanDenied(uid: Int): Boolean = call(false) { it.isLanDenied(uid) }
 
+    override fun isRestrictable(uid: Int): Boolean = call(true) { it.isRestrictable(uid) }
+
     override fun setAlertMask(mask: Int) = write { it.setAlertMask(mask) }
 
     /** A call that changes the service's device-wide state: system user only (see above). */

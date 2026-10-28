@@ -117,7 +117,7 @@ enum class VerdictSource {
  * this is false the UI must not claim those rules block anything: verdicts report them as
  * [Verdict.notEnforced] instead of blocked, the controls that only create such rules are hidden,
  * and the cards that show saved ones say they aren't enforced. What does block today: the uid
- * firewall (network Block / Wi-Fi only, lockdown, screen-off, background) and the system-wide
+ * firewall (network Block / Unmetered only, lockdown, screen-off, background) and the system-wide
  * hosts file.
  */
 object HostRules {

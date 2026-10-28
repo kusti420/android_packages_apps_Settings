@@ -219,7 +219,7 @@ fun policySummary(p: AppPolicy): String =
                 add(
                     when (p.network) {
                         NetworkAccess.ALLOW -> "Network on"
-                        NetworkAccess.UNMETERED_ONLY -> "Wi-Fi only"
+                        NetworkAccess.UNMETERED_ONLY -> "Unmetered only"
                         NetworkAccess.DENY -> "No network"
                     }
                 )

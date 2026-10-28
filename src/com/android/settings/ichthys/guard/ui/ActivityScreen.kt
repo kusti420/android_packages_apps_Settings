@@ -515,7 +515,7 @@ private fun EventActions(
         val access = pkg?.let { repo.effectiveAccess(it) }
         if (!blockedNext && access == NetworkAccess.UNMETERED_ONLY) {
             Text(
-                "Wi-Fi only: on mobile data this app has no network.",
+                "Unmetered only: on mobile data or a metered hotspot this app has no network.",
                 style = MaterialTheme.typography.bodySmall,
                 color = t.muted,
             )

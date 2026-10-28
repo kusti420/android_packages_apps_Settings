@@ -282,7 +282,7 @@ fun HomeScreen(
                         style = MaterialTheme.typography.titleLarge.copy(fontFamily = t.mono),
                         color = t.danger,
                     )
-                    // IchthysOS: a pause lifts the uid firewall (Block, Wi-Fi only, lockdown,
+                    // IchthysOS: a pause lifts the uid firewall (Block, Unmetered only, lockdown,
                     // screen-off, background); the hosts file and the shields aren't part of it.
                     Text(
                         "Monitoring continues. Network blocks and lockdown are off; the " +

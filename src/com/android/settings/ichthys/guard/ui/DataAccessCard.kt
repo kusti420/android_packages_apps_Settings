@@ -110,6 +110,28 @@ private val WRITE_TARGETS =
         ),
     )
 
+/**
+ * IchthysOS: the shields preinstalled apps are exempt from (the providers, telephony, Telecom and
+ * the sensor service skip FLAG_SYSTEM apps). A system app's page leaves them out: their switches
+ * would claim a protection it doesn't get.
+ */
+private val SYSTEM_EXEMPT_KEYS =
+    setOf(
+        OsSettingKey.CONTACTS.key,
+        OsSettingKey.SENSORS.key,
+        "ichthys_calendar_allowed_pkgs",
+        "ichthys_call_log_allowed_pkgs",
+        "ichthys_contacts_write_allowed_pkgs",
+        "ichthys_calendar_write_allowed_pkgs",
+        "ichthys_call_log_write_allowed_pkgs",
+        "ichthys_phone_number_allowed_pkgs",
+        "ichthys_sms_read_allowed_pkgs",
+        "ichthys_sms_send_allowed_pkgs",
+        "ichthys_mms_push_allowed_pkgs",
+        "ichthys_call_allowed_pkgs",
+        "ichthys_answer_calls_allowed_pkgs",
+    )
+
 private val SHIELDS =
     listOf(
         Shield(
@@ -457,13 +479,14 @@ fun DataAccessCard(
         if (isSystem) {
             Text(
                 "A system app: the contacts, calendar, call, message and sensor shields don't " +
-                    "apply to it.",
+                    "apply to it, so they aren't listed.",
                 style = MaterialTheme.typography.bodySmall,
                 color = t.muted,
                 modifier = Modifier.padding(bottom = 4.dp),
             )
         }
         for (s in SHIELDS) {
+            if (isSystem && s.keys.any { it in SYSTEM_EXEMPT_KEYS }) continue
             val on =
                 if (s.policyKey != null) !s.policyKey.selector(policy)
                 else remember(version, tick, packageName) { isProtected(context, s, packageName) }

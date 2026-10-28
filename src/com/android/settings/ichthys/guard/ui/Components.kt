@@ -213,6 +213,7 @@ fun <T> Segmented(
     label: (T) -> String,
     onSelect: (T) -> Unit,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
 ) {
     val t = Guard.tokens
     val colors =
@@ -229,6 +230,7 @@ fun <T> Segmented(
             SegmentedButton(
                 selected = o == selected,
                 onClick = { onSelect(o) },
+                enabled = enabled,
                 shape = SegmentedButtonDefaults.itemShape(i, options.size),
                 colors = colors,
                 icon = {},
@@ -347,6 +349,8 @@ fun AppIcon(packageName: String, modifier: Modifier = Modifier, size: Dp = 40.dp
     val cacheKey = "$packageName@$px"
     val icon by
         produceState(iconCache.get(cacheKey), packageName, px) {
+            // produceState keeps its value when the keys change: start from this package's.
+            value = iconCache.get(cacheKey)
             if (value == null) {
                 value =
                     withContext(Dispatchers.IO) {
