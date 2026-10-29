@@ -73,6 +73,7 @@ fun RulesScreen(
     vm: GuardViewModel,
     modifier: Modifier = Modifier,
     onOpenAutomation: () -> Unit = {},
+    onOpenSharedValues: () -> Unit = {},
 ) {
     val repo = vm.repo
     val context = LocalContext.current
@@ -165,6 +166,25 @@ fun RulesScreen(
                                 auto.profiles.count { it.enabled }.let { on ->
                                     if (on == 0) "No profile on" else "${quantity(on, "profile")} on"
                                 },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Guard.tokens.muted,
+                        )
+                    }
+                    Text("›", color = Guard.tokens.muted)
+                }
+            }
+        }
+
+        item {
+            GuardCard(Modifier.clickable(onClick = onOpenSharedValues), title = "Shared values") {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            "Location and units for weather and sun times",
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
+                        Text(
+                            "Set once, used by the whole system",
                             style = MaterialTheme.typography.bodySmall,
                             color = Guard.tokens.muted,
                         )

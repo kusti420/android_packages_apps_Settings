@@ -97,7 +97,7 @@ class GuardActivity : ComponentActivity() {
                 val vm: GuardViewModel = viewModel()
                 var tab by rememberSaveable { mutableStateOf(GuardTab.HOME) }
                 // Pages opened on top of the tabs, newest last: "a:<package>" (an app's page),
-                // "h:<destination>" or "s:automation". Back walks the stack, so app →
+                // "h:<destination>", "s:automation" or "s:shared". Back walks the stack, so app →
                 // destination → app works.
                 var stack by rememberSaveable { mutableStateOf("") }
                 val pages = if (stack.isEmpty()) emptyList() else stack.split('\n')
@@ -173,6 +173,8 @@ class GuardActivity : ComponentActivity() {
                     val top = pages.lastOrNull()
                     if (top == PAGE_AUTOMATION) {
                         AutomationScreen(vm, onOpenApp = open, onBack = pop, modifier = m)
+                    } else if (top == PAGE_SHARED_VALUES) {
+                        SharedValuesScreen(onBack = pop, modifier = m)
                     } else if (top != null && top.startsWith("h:")) {
                         DestinationScreen(
                             vm,
@@ -201,7 +203,12 @@ class GuardActivity : ComponentActivity() {
                             GuardTab.APPS -> AppsScreen(vm, open, m)
                             GuardTab.ACTIVITY -> ActivityScreen(vm, open, openHost, m)
                             GuardTab.RULES ->
-                                RulesScreen(vm, m, onOpenAutomation = { push(PAGE_AUTOMATION) })
+                                RulesScreen(
+                                    vm,
+                                    m,
+                                    onOpenAutomation = { push(PAGE_AUTOMATION) },
+                                    onOpenSharedValues = { push(PAGE_SHARED_VALUES) },
+                                )
                         }
                     }
                 }
@@ -226,6 +233,7 @@ class GuardActivity : ComponentActivity() {
 
     companion object {
         private const val PAGE_AUTOMATION = "s:automation"
+        private const val PAGE_SHARED_VALUES = "s:shared"
 
         /** Opens Guard at [packageName]'s page (the stock App info page's Guard row). */
         @JvmStatic
