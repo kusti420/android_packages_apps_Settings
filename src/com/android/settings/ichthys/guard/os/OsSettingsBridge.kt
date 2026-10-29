@@ -186,7 +186,8 @@ val SHIELD_SECTIONS: List<Pair<String, List<ShieldGroupRow>>> =
                 ),
                 ShieldGroupRow(
                     "Clipboard",
-                    "Apps read the clipboard only right after you tap in them",
+                    "Apps read the clipboard only right after you tap in them, " +
+                        "copied passwords only when you paste",
                     listOf(ShieldSwitch.CLIPBOARD),
                 ),
             ),
