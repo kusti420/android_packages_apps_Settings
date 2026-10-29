@@ -88,9 +88,20 @@ fun SharedValuesScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
     val lastFix = remember(tick) { Settings.Secure.getString(resolver, KEY_LAST_FIX) }
     val trips = remember(tick) { readTrips(Settings.Secure.getString(resolver, KEY_TRIPS)) }
     val units = remember(tick) { Settings.Secure.getString(resolver, KEY_UNITS) ?: UNITS_METRIC }
+    val fake = remember(tick) { Settings.Secure.getString(resolver, KEY_FAKE) }
+    val fakeName = remember(tick) { Settings.Secure.getString(resolver, KEY_FAKE_NAME) }
+    val spoofOn = remember(tick) { Settings.Secure.getString(resolver, KEY_SPOOF_ON) != "0" }
+    val realPkgs =
+        remember(tick) {
+            Settings.Secure.getString(resolver, KEY_REAL_PKGS)
+                ?.split(',')
+                ?.map { it.trim() }
+                ?.filter { it.isNotEmpty() }
+                .orEmpty()
+        }
     val now = remember(tick) { System.currentTimeMillis() }
 
-    // What the place search is for: null (closed), "home", or "trip".
+    // What the place search is for: null (closed), "home", "trip" or "fake".
     var searchFor by remember { mutableStateOf<String?>(null) }
 
     fun saveTrips(next: List<Trip>) = putSecure(context, KEY_TRIPS, writeTrips(next))
@@ -218,6 +229,88 @@ fun SharedValuesScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
                 } else {
                     TextButton(onClick = { searchFor = "trip" }) { Text("Add trip") }
                 }
+            }
+        }
+        item {
+            GuardCard(title = "Fake location for apps") {
+                Text(
+                    "Installed apps get fixes at this place instead of your real position, and " +
+                        "their Wi-Fi, cell and Bluetooth scans come back empty (each of them " +
+                        "would place the phone). System apps, emergency calls and the apps you " +
+                        "allow keep the real location. Play services / microG counts as an app: " +
+                        "allow it only if your maps app needs it.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = t.muted,
+                )
+                if (searchFor == "fake") {
+                    PlaceSearch(
+                        onPick = { place ->
+                            putSecure(context, KEY_FAKE, place.latLon)
+                            putSecure(context, KEY_FAKE_NAME, place.name)
+                            putSecure(context, KEY_SPOOF_ON, "1")
+                            searchFor = null
+                        },
+                        onCancel = { searchFor = null },
+                    )
+                } else if (fake == null) {
+                    Text(
+                        "Off: no fake place set. Apps get your real location when allowed.",
+                        style = MaterialTheme.typography.bodyLarge,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                    TextButton(onClick = { searchFor = "fake" }) { Text("Choose a fake place") }
+                } else {
+                    ToggleRow(
+                        "Apps see ${fakeName ?: formatLatLon(fake)}",
+                        spoofOn,
+                        formatLatLon(fake),
+                    ) { on ->
+                        putSecure(context, KEY_SPOOF_ON, if (on) "1" else "0")
+                    }
+                    TextButton(onClick = { searchFor = "fake" }) { Text("Change place") }
+                }
+                SectionLabel(
+                    "Real location · ${realPkgs.size}",
+                    Modifier.padding(top = 8.dp),
+                )
+                val pm = context.packageManager
+                for (pkg in realPkgs) {
+                    val label =
+                        remember(pkg) {
+                            try {
+                                pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
+                            } catch (e: Exception) {
+                                pkg
+                            }
+                        }
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        AppIcon(pkg, size = 32.dp)
+                        Text(
+                            label,
+                            style = MaterialTheme.typography.bodyLarge,
+                            modifier = Modifier.weight(1f).padding(start = 12.dp),
+                        )
+                        TextButton(
+                            onClick = {
+                                putSecure(
+                                    context,
+                                    KEY_REAL_PKGS,
+                                    (realPkgs - pkg).joinToString(","),
+                                )
+                            }
+                        ) {
+                            Text("Remove")
+                        }
+                    }
+                }
+                Text(
+                    "Give an app the real location on its page: Apps, the app, Fake location.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = t.muted,
+                )
             }
         }
         item {
@@ -549,10 +642,24 @@ private const val KEY_TRIPS = "ichthys_location_trips"
 private const val KEY_ACTIVE = "ichthys_location_active"
 private const val KEY_LAST_FIX = "ichthys_location_last_fix"
 private const val KEY_UNITS = "ichthys_units"
+private const val KEY_FAKE = "ichthys_location_fake"
+private const val KEY_FAKE_NAME = "ichthys_location_fake_name"
+private const val KEY_SPOOF_ON = "ichthys_location_spoof"
+private const val KEY_REAL_PKGS = "ichthys_location_real_pkgs"
 private const val UNITS_METRIC = "metric"
 private const val UNITS_IMPERIAL = "imperial"
 
 private val SHARED_VALUE_URIS =
-    listOf(KEY_HOME, KEY_HOME_NAME, KEY_TRIPS, KEY_ACTIVE, KEY_LAST_FIX, KEY_UNITS).map {
-        Settings.Secure.getUriFor(it)
-    }
+    listOf(
+            KEY_HOME,
+            KEY_HOME_NAME,
+            KEY_TRIPS,
+            KEY_ACTIVE,
+            KEY_LAST_FIX,
+            KEY_UNITS,
+            KEY_FAKE,
+            KEY_FAKE_NAME,
+            KEY_SPOOF_ON,
+            KEY_REAL_PKGS,
+        )
+        .map { Settings.Secure.getUriFor(it) }

@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import com.android.settings.R
 import com.android.settings.ichthys.guard.model.AppPolicy
 import com.android.settings.ichthys.guard.model.OsSettingKey
+import com.android.settings.ichthys.guard.model.SettingsTable
 import com.android.settings.ichthys.guard.os.ShieldSwitch
 import com.android.settings.ichthys.guard.ui.theme.Guard
 import com.android.settings.ichthys.protect.IchthysProtect
@@ -235,7 +236,8 @@ private val SHIELDS =
         ),
         Shield(
             "Clipboard",
-            "Reads the clipboard only right after you tap in it",
+            "Reads the clipboard only right after you tap in it, " +
+                "copied passwords only when you paste",
             "Reads the clipboard at any time, also in the background",
             listOf(OsSettingKey.CLIPBOARD.key),
             true,
@@ -278,6 +280,19 @@ private val SHIELDS =
             ),
             protectedRes = R.string.ichthys_shield_location_on,
             realRes = R.string.ichthys_shield_location_off,
+        ),
+        // IchthysOS: the fake location (Shared values); this list is who sees the real one.
+        Shield(
+            "Fake location",
+            "Sees the fake place, and no Wi-Fi, cell or Bluetooth scans",
+            "Sees your real location",
+            listOf("ichthys_location_real_pkgs"),
+            true,
+            listOf(
+                Manifest.permission.ACCESS_FINE_LOCATION,
+                Manifest.permission.ACCESS_COARSE_LOCATION,
+            ),
+            masters = listOf(ShieldSwitch("ichthys_location_spoof", SettingsTable.SECURE)),
         ),
         Shield(
             "Bluetooth and Wi-Fi scans",
