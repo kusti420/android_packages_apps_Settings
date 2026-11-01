@@ -131,11 +131,6 @@ public final class ShoalBadgeDrawable extends Drawable {
         return d;
     }
 
-    /** The wrapped glyph, so a badge is never wrapped twice. */
-    @Nullable
-    Drawable getGlyph() {
-        return mGlyph;
-    }
 
     int getColor() {
         return mColor;
@@ -175,7 +170,11 @@ public final class ShoalBadgeDrawable extends Drawable {
         canvas.drawCircle(x0 + mDot / 2f + gap / 2f + r, y0 + mDot + gap + r, r, mDots);
     }
 
-    /** The plain icon this badge wraps (for re-styling when the icon options change). */
+    /**
+     * The plain icon this badge wraps: so a badge is never wrapped twice, and for re-styling
+     * when the icon options change.
+     */
+    @Nullable
     public Drawable getGlyph() {
         return mGlyph;
     }
