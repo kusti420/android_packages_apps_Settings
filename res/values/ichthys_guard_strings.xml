@@ -111,6 +111,11 @@
     <!-- First-launch buttons -->
     <string name="ichthys_guard_first_launch_apply">Apply recommended</string>
     <string name="ichthys_guard_first_launch_customize">Customize</string>
+    <!-- IchthysOS: Customize opens the app's Guard page in review mode (GuardReviewActivity); its
+         bottom bar instead of the tabs. The app stays quarantined until Done. -->
+    <string name="ichthys_guard_review_customize_hint">The app stays quarantined until you tap Done. Changes apply as you make them.</string>
+    <string name="ichthys_guard_review_back">Back to review</string>
+    <string name="ichthys_guard_review_done">Done – open app</string>
     <string name="ichthys_guard_first_launch_failed">Couldn\'t release <xliff:g id="app">%1$s</xliff:g></string>
     <!-- IchthysOS: top of the first-launch sheet when the user closed this app's review before
          without a choice (back, a tap outside, leaving it). -->

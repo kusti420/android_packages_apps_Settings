@@ -105,7 +105,8 @@ import kotlinx.coroutines.withContext
  * It shows the install-time tracker scan, the requested permissions and a recommended profile
  * ([FirstLaunchAdvisor]). Each button sets the policy, lifts Settings' suspension and starts the
  * app; back or a tap outside the sheet leaves it quarantined. IchthysOS: there is no "open as is":
- * the way out is the recommendation, a preset or Customize. A review closed without a choice is
+ * the way out is the recommendation, a preset or Customize. Customize doesn't release: it opens
+ * the app's Guard page in review mode (GuardReviewActivity), whose "Done – open app" does. A review closed without a choice is
  * marked unfinished (GuardRepository.markReviewUnfinished): the journal, Guard's app list and a
  * silent notification say so, and the sheet says so when it opens again.
  *
@@ -202,6 +203,14 @@ class FirstLaunchActivity : ComponentActivity() {
     /** Writes the policy for [choice], lifts the quarantine and starts the app. Main thread. */
     private suspend fun release(sheet: SheetData, choice: SheetChoice, preset: AppPreset?) {
         val pkg = sheet.facts.packageName
+        if (choice == SheetChoice.CUSTOMIZE) {
+            // IchthysOS: Customize keeps the quarantine. The app's page in review mode takes over
+            // the review: Done there releases and opens the app; leaving it marks the review
+            // unfinished, as leaving this sheet does.
+            startActivity(GuardActivity.firstLaunchReviewIntent(this, pkg))
+            finish()
+            return
+        }
         val (released, launch) =
             withContext(Dispatchers.IO) {
                 if (choice == SheetChoice.APPLY && preset != null && preset != AppPreset.CUSTOM) {
@@ -224,7 +233,6 @@ class FirstLaunchActivity : ComponentActivity() {
                 sheet.repo.journal(
                     JournalKind.RELEASED,
                     when {
-                        choice == SheetChoice.CUSTOMIZE -> "Released to set up by hand"
                         preset != null && preset != AppPreset.CUSTOM -> "Released with the ${preset.label} preset"
                         else -> "Released with the recommendation"
                     },
@@ -243,14 +251,6 @@ class FirstLaunchActivity : ComponentActivity() {
             return
         }
         launch?.let { startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-        if (choice == SheetChoice.CUSTOMIZE) {
-            // On top of the app: back from Guard's page lands in the app.
-            startActivity(
-                Intent(this, GuardActivity::class.java)
-                    .putExtra(Intent.EXTRA_PACKAGE_NAME, pkg)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            )
-        }
         finish()
     }
 
@@ -281,8 +281,20 @@ class FirstLaunchActivity : ComponentActivity() {
             false
         }
 
-    private companion object {
-        const val TAG = "IchthysGuard"
+    companion object {
+        private const val TAG = "IchthysGuard"
+
+        /**
+         * IchthysOS: this review for [pkg], the way the suspended-app dialog's Review button
+         * starts it (the unfinished-review notification and GuardReviewActivity's "Back to
+         * review" use it).
+         */
+        @JvmStatic
+        fun reviewIntent(context: Context, pkg: String): Intent =
+            Intent(Intent.ACTION_SHOW_SUSPENDED_APP_DETAILS)
+                .setClass(context, FirstLaunchActivity::class.java)
+                .putExtra(Intent.EXTRA_PACKAGE_NAME, pkg)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }
 }
 

@@ -24,22 +24,28 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.getValue
@@ -61,6 +67,7 @@ import com.android.settings.ichthys.guard.ui.theme.Guard
 import com.android.settings.ichthys.guard.ui.theme.GuardTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** IchthysOS: the three destinations of the bottom bar. The gear page sits in the top bar. */
 enum class GuardTab(val label: String, val glyph: String) {
@@ -74,10 +81,23 @@ enum class GuardTab(val label: String, val glyph: String) {
  * of them: an app's page, a destination's page, the gear and its sub-pages, the verify page.
  * IchthysOS: the page stack is a string in saved state ("a:<package>", "h:<host>", "s:<page>",
  * ...), so Back walks it and a rotation keeps it.
+ *
+ * IchthysOS: open so [GuardReviewActivity] can run it in first-launch review mode.
  */
-class GuardActivity : ComponentActivity() {
+open class GuardActivity : ComponentActivity() {
     private val openPackage = mutableStateOf<String?>(null)
     private val openPage = mutableStateOf<String?>(null)
+
+    /**
+     * IchthysOS: the quarantined app being set up from the first-launch review's Customize
+     * (only in [GuardReviewActivity]); null for Guard itself.
+     */
+    private var reviewPkg: String? = null
+    /** IchthysOS: the review ended by Done or "Back to review": leaving isn't unfinished. */
+    private var reviewHandled = false
+    private var reviewMarked = false
+    private var reviewNotified = false
+    private val reviewBusy = mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
@@ -89,6 +109,13 @@ class GuardActivity : ComponentActivity() {
             finish()
             return
         }
+        reviewPkg =
+            if (this is GuardReviewActivity) intent?.getStringExtra(Intent.EXTRA_PACKAGE_NAME)
+            else null
+        if (this is GuardReviewActivity && reviewPkg.isNullOrEmpty()) {
+            finish()
+            return
+        }
         handleIntent(intent)
         // Settings' Application starts this lazily; make sure channels and the weekly alarm exist.
         GuardNotifications.init(this)
@@ -97,12 +124,18 @@ class GuardActivity : ComponentActivity() {
                 val t = Guard.tokens
                 val vm: GuardViewModel = viewModel()
                 var tab by rememberSaveable { mutableStateOf(GuardTab.PROTECTION) }
-                var stack by rememberSaveable { mutableStateOf("") }
+                val review = reviewPkg
+                var stack by rememberSaveable { mutableStateOf(review?.let { "a:$it" } ?: "") }
                 val pages = if (stack.isEmpty()) emptyList() else stack.split('\n')
                 val push: (String) -> Unit = { page ->
                     if (pages.lastOrNull() != page) stack = (pages + page).joinToString("\n")
                 }
-                val pop: () -> Unit = { stack = pages.dropLast(1).joinToString("\n") }
+                // IchthysOS: in the review, Back from the app's page leaves the review (the app
+                // stays quarantined, the review is marked unfinished in onStop).
+                val pop: () -> Unit = {
+                    if (review != null && pages.size <= 1) finish()
+                    else stack = pages.dropLast(1).joinToString("\n")
+                }
                 openPackage.value?.let {
                     stack = "a:$it"
                     openPackage.value = null
@@ -131,7 +164,7 @@ class GuardActivity : ComponentActivity() {
                         openData = { pkg, group -> push("data:$pkg:${group.name}") },
                         openPage = { push("s:$it") },
                         openVerify = { pkg -> push(if (pkg == null) PAGE_VERIFY else "s:verify:$pkg") },
-                        openTab = { tab = it; stack = "" },
+                        openTab = { if (review == null) { tab = it; stack = "" } },
                         back = pop,
                     )
                 Scaffold(
@@ -158,7 +191,8 @@ class GuardActivity : ComponentActivity() {
                                 color = t.text,
                             )
                             Spacer(Modifier.weight(1f))
-                            IconButton(onClick = { push(PAGE_GEAR) }) {
+                            // IchthysOS: the review stays on the app being set up.
+                            if (review == null) IconButton(onClick = { push(PAGE_GEAR) }) {
                                 Icon(
                                     Icons.Filled.Settings,
                                     contentDescription = "Guard settings",
@@ -168,7 +202,13 @@ class GuardActivity : ComponentActivity() {
                         }
                     },
                     bottomBar = {
-                        Column {
+                        if (review != null) {
+                            ReviewBar(
+                                busy = reviewBusy.value,
+                                onBackToReview = { backToReview(review) },
+                                onDone = { finishReview(review) },
+                            )
+                        } else Column {
                             HorizontalDivider(color = t.hairline, thickness = t.hairlineWidth)
                             NavigationBar(containerColor = t.ink, tonalElevation = 0.dp) {
                                 // The selected tab is the bar's one accented element.
@@ -237,7 +277,10 @@ class GuardActivity : ComponentActivity() {
                                 m,
                             )
                         }
-                        top.startsWith("a:") -> AppPageScreen(vm, nav, top.removePrefix("a:"), m)
+                        top.startsWith("a:") -> {
+                            val pkg = top.removePrefix("a:")
+                            AppPageScreen(vm, nav, pkg, m, firstLaunchReview = pkg == review)
+                        }
                         else -> ProtectionScreen(vm, nav, m)
                     }
                 }
@@ -257,6 +300,82 @@ class GuardActivity : ComponentActivity() {
             val repo = GuardRepository.get(app)
             repo.refreshPause()
             repo.refreshEvidence(force = true)
+        }
+    }
+
+    // IchthysOS: leaving the review without Done (Back, home, another app) is an unfinished
+    // review, like leaving the sheet: finishing marks it and notifies; only stopping marks it,
+    // in case the user comes back from recents; the notification follows if it is destroyed.
+    override fun onStop() {
+        super.onStop()
+        if (!isChangingConfigurations) noteReviewUnfinished(notify = isFinishing)
+    }
+
+    override fun onDestroy() {
+        if (!isChangingConfigurations) noteReviewUnfinished(notify = true)
+        super.onDestroy()
+    }
+
+    private fun noteReviewUnfinished(notify: Boolean) {
+        val pkg = reviewPkg ?: return
+        if (reviewHandled || reviewNotified || (!notify && reviewMarked)) return
+        reviewMarked = true
+        reviewNotified = notify
+        val app = applicationContext
+        Thread(
+                { GuardRepository.get(app).markReviewUnfinished(pkg, notify) },
+                "IchthysGuardReview",
+            )
+            .start()
+    }
+
+    /** IchthysOS: "Back to review": the sheet again, which owns the review from here. */
+    private fun backToReview(pkg: String) {
+        reviewHandled = true
+        startActivity(FirstLaunchActivity.reviewIntent(this, pkg))
+        finish()
+    }
+
+    /**
+     * IchthysOS: "Done – open app": the policy is already what the user set on the page; lift the
+     * quarantine (which also clears the unfinished mark and its notification) and start the app.
+     */
+    private fun finishReview(pkg: String) {
+        if (reviewBusy.value) return
+        reviewBusy.value = true
+        reviewHandled = true
+        val app = applicationContext
+        lifecycleScope.launch {
+            val (released, label) =
+                withContext(Dispatchers.IO) {
+                    val repo = GuardRepository.get(app)
+                    val label = repo.appFor(pkg)?.label ?: pkg
+                    val quarantined =
+                        runCatching { app.packageManager.isPackageQuarantined(pkg) }
+                            .getOrDefault(true)
+                    if (quarantined) {
+                        releaseQuarantine(repo, pkg, "Released to set up by hand") to label
+                    } else {
+                        // Released meanwhile (another review, the app page): just open it.
+                        repo.clearUnfinishedReview(pkg)
+                        app.packageManager.getLaunchIntentForPackage(pkg)?.let {
+                            app.startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                        }
+                        true to label
+                    }
+                }
+            if (!released) {
+                reviewHandled = false
+                reviewBusy.value = false
+                Toast.makeText(
+                        this@GuardActivity,
+                        getString(R.string.ichthys_guard_first_launch_failed, label),
+                        Toast.LENGTH_SHORT,
+                    )
+                    .show()
+                return@launch
+            }
+            finish()
         }
     }
 
@@ -285,6 +404,16 @@ class GuardActivity : ComponentActivity() {
             Intent(context, GuardActivity::class.java)
                 .putExtra(EXTRA_OPEN_PAGE, OPEN_PAGE_QUIET_NOTIFICATIONS)
 
+        /**
+         * IchthysOS: the first-launch review's Customize: [packageName]'s page in review mode
+         * ([GuardReviewActivity]), in a task of its own, with the app still quarantined.
+         */
+        @JvmStatic
+        fun firstLaunchReviewIntent(context: Context, packageName: String): Intent =
+            Intent(context, GuardReviewActivity::class.java)
+                .putExtra(Intent.EXTRA_PACKAGE_NAME, packageName)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_MULTIPLE_TASK)
+
         /** Opens Guard at [packageName]'s page (the stock App info page's Guard row). */
         @JvmStatic
         fun appIntent(context: Context, packageName: String): Intent =
@@ -301,6 +430,8 @@ class GuardActivity : ComponentActivity() {
     }
 
     private fun handleIntent(intent: Intent?) {
+        // IchthysOS: the review stays on its app (the stack starts at its page).
+        if (reviewPkg != null) return
         val pkg =
             intent?.getStringExtra(GuardNotifications.EXTRA_OPEN_PACKAGE)
                 ?: intent?.getStringExtra(Intent.EXTRA_PACKAGE_NAME)
@@ -322,3 +453,54 @@ data class GuardNav(
     val openTab: (GuardTab) -> Unit,
     val back: () -> Unit,
 )
+
+/**
+ * IchthysOS: Guard in first-launch review mode, started by the review sheet's Customize
+ * ([GuardActivity.firstLaunchReviewIntent]). The quarantined app's page with a review bar instead
+ * of the tabs: edits apply to the policy as usual, "Done – open app" lifts the quarantine and
+ * starts the app, "Back to review" returns to the sheet, and leaving any other way keeps the app
+ * quarantined with the review marked unfinished. A class of its own so it gets its own task
+ * (manifest taskAffinity="") and nothing aimed at Guard (notifications, App info) lands in it.
+ */
+class GuardReviewActivity : GuardActivity()
+
+/** IchthysOS: the review mode's bottom bar (replaces the tabs). */
+@androidx.compose.runtime.Composable
+private fun ReviewBar(busy: Boolean, onBackToReview: () -> Unit, onDone: () -> Unit) {
+    val t = Guard.tokens
+    Column(Modifier.navigationBarsPadding()) {
+        HorizontalDivider(color = t.hairline, thickness = t.hairlineWidth)
+        Column(
+            Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                stringResource(R.string.ichthys_guard_review_customize_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = t.muted,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = onBackToReview,
+                    enabled = !busy,
+                    modifier = Modifier.weight(1f).height(52.dp),
+                ) {
+                    Text(stringResource(R.string.ichthys_guard_review_back))
+                }
+                // The bar's one accented element: the way out.
+                Button(
+                    onClick = onDone,
+                    enabled = !busy,
+                    modifier = Modifier.weight(1f).height(52.dp),
+                    colors =
+                        ButtonDefaults.buttonColors(
+                            containerColor = t.accent,
+                            contentColor = t.onAccent,
+                        ),
+                ) {
+                    Text(stringResource(R.string.ichthys_guard_review_done))
+                }
+            }
+        }
+    }
+}

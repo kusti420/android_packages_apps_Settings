@@ -6338,6 +6338,20 @@
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:launchMode="singleTop" />
 
+        <!-- IchthysOS Guard first-launch review, Customize: the quarantined app's Guard page in
+             review mode (GuardReviewActivity extends GuardActivity). Its own task (empty
+             affinity, started with NEW_TASK|MULTIPLE_TASK by FirstLaunchActivity), so nothing
+             aimed at Guard lands in it; removed from recents once finished. -->
+        <activity
+            android:name=".ichthys.guard.ui.GuardReviewActivity"
+            android:label="@string/ichthys_guard_title"
+            android:theme="@style/Theme.IchthysGuard"
+            android:exported="false"
+            android:directBootAware="false"
+            android:taskAffinity=""
+            android:autoRemoveFromRecents="true"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden" />
+
         <!-- IchthysOS Guard first-launch review sheet (W8b decision 15). Settings is the
              suspending package of quarantined new apps; the Review button of the system's
              SuspendedAppActivity starts this through ACTION_SHOW_SUSPENDED_APP_DETAILS. Exported

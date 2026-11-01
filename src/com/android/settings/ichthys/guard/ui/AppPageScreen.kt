@@ -68,7 +68,17 @@ import kotlinx.coroutines.withContext
  * reset identity).
  */
 @Composable
-fun AppPageScreen(vm: GuardViewModel, nav: GuardNav, packageName: String, modifier: Modifier = Modifier) {
+fun AppPageScreen(
+    vm: GuardViewModel,
+    nav: GuardNav,
+    packageName: String,
+    modifier: Modifier = Modifier,
+    /**
+     * IchthysOS: opened by the first-launch review's Customize (GuardReviewActivity): the app
+     * stays quarantined while the user sets it up, and only the review bar's Done releases it.
+     */
+    firstLaunchReview: Boolean = false,
+) {
     val repo = vm.repo
     val t = Guard.tokens
     val policies by repo.policies.collectAsStateWithLifecycle()
@@ -124,6 +134,7 @@ fun AppPageScreen(vm: GuardViewModel, nav: GuardNav, packageName: String, modifi
             // The effective state now, in the Apps row's words.
             Text(
                 when {
+                    quarantined && firstLaunchReview -> "Quarantined · opens when you tap Done"
                     quarantined && packageName in unfinished -> "Quarantined · review not finished"
                     quarantined -> "Quarantined · pick a preset to release"
                     policy.dormant -> "Asleep · unused for weeks, no network"
@@ -160,7 +171,9 @@ fun AppPageScreen(vm: GuardViewModel, nav: GuardNav, packageName: String, modifi
                 )
                 if (quarantined) {
                     Text(
-                        "Picking a preset releases the app from quarantine and opens it.",
+                        // IchthysOS: during the review, Done releases it, not a preset.
+                        if (firstLaunchReview) "Changes apply right away; the app opens when you tap Done."
+                        else "Picking a preset releases the app from quarantine and opens it.",
                         style = MaterialTheme.typography.bodySmall,
                         color = t.accent,
                         modifier = Modifier.padding(top = 4.dp),
@@ -373,7 +386,7 @@ fun AppPageScreen(vm: GuardViewModel, nav: GuardNav, packageName: String, modifi
                 Text(
                     preset.summary +
                         ". Every control of this page is set at once; anything you changed before is replaced." +
-                        if (quarantined) " The app is released from quarantine." else ""
+                        if (quarantined && !firstLaunchReview) " The app is released from quarantine." else ""
                 )
             },
             confirmButton = {
@@ -382,7 +395,7 @@ fun AppPageScreen(vm: GuardViewModel, nav: GuardNav, packageName: String, modifi
                         confirmPreset = null
                         scope.launch(Dispatchers.IO) {
                             repo.applyPreset(packageName, preset)
-                            if (quarantined) releaseQuarantine(repo, packageName)
+                            if (quarantined && !firstLaunchReview) releaseQuarantine(repo, packageName)
                         }
                         changed()
                     }
@@ -421,8 +434,15 @@ private fun sheetSummary(repo: com.android.settings.ichthys.guard.data.GuardRepo
         .joinToString(" · ")
 }
 
-/** Lifts Guard's quarantine of [pkg] and starts it (the same path the first-launch sheet uses). */
-internal fun releaseQuarantine(repo: com.android.settings.ichthys.guard.data.GuardRepository, pkg: String) {
+/**
+ * Lifts Guard's quarantine of [pkg] and starts it (the same path the first-launch sheet uses).
+ * IchthysOS: [detail] is the journal line; false when the quarantine couldn't be lifted.
+ */
+internal fun releaseQuarantine(
+    repo: com.android.settings.ichthys.guard.data.GuardRepository,
+    pkg: String,
+    detail: String = "Released with a preset",
+): Boolean {
     val ctx = repo.contextForLists()
     try {
         val failed =
@@ -430,12 +450,15 @@ internal fun releaseQuarantine(repo: com.android.settings.ichthys.guard.data.Gua
         if (failed.isNullOrEmpty()) {
             // IchthysOS: released, so an unfinished first-launch review is finished too.
             repo.clearUnfinishedReview(pkg)
-            repo.journal(com.android.settings.ichthys.guard.model.JournalKind.RELEASED, "Released with a preset", pkg)
+            repo.journal(com.android.settings.ichthys.guard.model.JournalKind.RELEASED, detail, pkg)
             ctx.packageManager.getLaunchIntentForPackage(pkg)?.let {
                 ctx.startActivity(it.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
             }
+            return true
         }
+        android.util.Log.w("IchthysGuard", "could not lift the quarantine of $pkg")
     } catch (e: RuntimeException) {
         android.util.Log.w("IchthysGuard", "could not lift the quarantine of $pkg", e)
     }
+    return false
 }

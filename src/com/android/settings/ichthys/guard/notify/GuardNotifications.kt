@@ -435,10 +435,7 @@ object GuardNotifications {
             PendingIntent.getActivity(
                 ctx,
                 reviewNotificationId(pkg),
-                Intent(Intent.ACTION_SHOW_SUSPENDED_APP_DETAILS)
-                    .setClass(ctx, FirstLaunchActivity::class.java)
-                    .putExtra(Intent.EXTRA_PACKAGE_NAME, pkg)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                FirstLaunchActivity.reviewIntent(ctx, pkg),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
         val text = ctx.getString(R.string.ichthys_guard_review_unfinished_text)
