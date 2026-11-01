@@ -24,6 +24,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.util.AttributeSet;
 import android.util.RotationUtils;
+import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.Surface;
 import android.view.ViewGroup;
@@ -119,10 +120,38 @@ public class UdfpsEnrollView extends FrameLayout implements UdfpsEnrollHelper.Li
             mProgressBarRadius =
                     (int) (mOverlayParams.getScaleFactor() * getContext().getResources().getInteger(
                             R.integer.config_udfpsEnrollProgressBar));
+            // IchthysOS: keep the whole ring on the panel. The ring's outer edge is the sensor
+            // radius plus this padding, so it may not exceed the sensor's clearance to the nearest
+            // panel edge (A52s: sensor 540,2137 r119 on 1080x2400 -> 144px below the sensor).
+            mProgressBarRadius = Math.min(mProgressBarRadius, getMaxProgressBarRadius());
             mSensorRect = new Rect(mOverlayParams.getSensorBounds());
 
             onSensorRectUpdated();
         });
+    }
+
+    /** IchthysOS: the ring padding that leaves 8dp between the ring and the nearest panel edge. */
+    private int getMaxProgressBarRadius() {
+        final Rect sensor = mOverlayParams.getSensorBounds();
+        final int clearance = Math.min(
+                Math.min(sensor.top, sensor.left),
+                Math.min(mOverlayParams.getNaturalDisplayHeight() - sensor.bottom,
+                        mOverlayParams.getNaturalDisplayWidth() - sensor.right));
+        return Math.max(getMinProgressBarRadius(), clearance - dp(8));
+    }
+
+    /** IchthysOS: ring padding below which the 12dp stroke would sit on the sensor disc. */
+    int getMinProgressBarRadius() {
+        return dp(20);
+    }
+
+    int getProgressBarRadius() {
+        return mProgressBarRadius;
+    }
+
+    private int dp(int v) {
+        return Math.round(TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v,
+                getResources().getDisplayMetrics()));
     }
 
     /**
@@ -138,7 +167,10 @@ public class UdfpsEnrollView extends FrameLayout implements UdfpsEnrollHelper.Li
      * @param decreasePadding the decrease padding
      */
     void setDecreasePadding(int decreasePadding) {
-        mProgressBarRadius -= decreasePadding;
+        // IchthysOS: never below the floor; a negative radius turns the view inside out (the
+        // A52s footer band overlaps the sensor itself, see adjustUdfpsVieWithFooterBar).
+        mProgressBarRadius = Math.max(getMinProgressBarRadius(),
+                mProgressBarRadius - decreasePadding);
         onSensorRectUpdated();
     }
 

@@ -39,6 +39,7 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
 import com.android.settings.R;
+import com.android.settings.ichthys.ShoalBiometricStyle;
 
 /**
  * UDFPS fingerprint drawable that is shown when enrolling
@@ -304,6 +305,9 @@ public class UdfpsEnrollDrawable extends Drawable {
         mMovingTargetFill = ta.getColor(
                 R.styleable.BiometricsEnrollView_biometricsMovingTargetFill, 0);
         ta.recycle();
+        // IchthysOS: accent glyph on an accent-tinted disc (Shoal), not the fixed Google blues.
+        mEnrollIcon = ShoalBiometricStyle.accent(context);
+        mMovingTargetFill = ShoalBiometricStyle.accentFill(context);
     }
 
 }

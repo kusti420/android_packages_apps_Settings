@@ -21,6 +21,7 @@ import android.animation.ObjectAnimator;
 import android.content.Context;
 import android.content.res.Configuration;
 import android.content.res.TypedArray;
+import android.graphics.Color;
 import android.graphics.Insets;
 import android.graphics.Point;
 import android.graphics.Rect;
@@ -178,8 +179,28 @@ public class UdfpsEnrollEnrollingView extends GlifLayout {
 
         if (udfpsProgressDrawableBottom > footerBarTop) {
             int adjustPadding = udfpsProgressDrawableBottom - footerBarTop;
+            // IchthysOS: on the A52s the sensor itself (centre y=2137 of 2400) lies inside the
+            // 72dp footer band, so no shrink can lift the ring above the footer; shrinking that far
+            // only collapses it. The footer is see-through here (getFooterBackgroundColor), so let
+            // the ring run under it instead.
+            if (mUdfpsEnrollView != null && mUdfpsEnrollView.getProgressBarRadius() - adjustPadding
+                    < mUdfpsEnrollView.getMinProgressBarRadius()) {
+                return;
+            }
             setDecreasePadding(adjustPadding);
         }
+    }
+
+    // IchthysOS: the ring draws under the footer band (adjustUdfpsVieWithFooterBar), so the footer
+    // stays see-through in the Setup Wizard flow too, where GlifLayout would otherwise paint it.
+    @Override
+    public int getFooterBackgroundColor() {
+        return Color.TRANSPARENT;
+    }
+
+    @Override
+    public int getFooterBarMoreToScrollBackgroundColor() {
+        return Color.TRANSPARENT;
     }
 
     private int getOnScreenPositionTop(View view) {

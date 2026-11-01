@@ -74,3 +74,55 @@ data class LabeledEvent(
     val isTracker: Boolean
         get() = tracker != null
 }
+
+/**
+ * IchthysOS: a run of consecutive events that are the same attempt (same app, same destination
+ * and port, same kind, same outcome), shown in the stream as one row with a count ("×7") and its
+ * first and last time. Presentation only: [events] are the stream's own events, newest first,
+ * nothing is dropped.
+ */
+data class EventRun(val events: List<LabeledEvent>) {
+    val head: LabeledEvent
+        get() = events.first()
+
+    val count: Int
+        get() = events.size
+
+    /** Newest first, so the oldest event (the first attempt) is the last one. */
+    val firstMs: Long
+        get() = events.last().event.timeMs
+
+    val lastMs: Long
+        get() = events.first().event.timeMs
+
+    /** Stable while the run grows at its newest end: the first attempt's sequence number. */
+    val id: Long
+        get() = events.last().event.seq
+
+    companion object {
+        /** Whether two events are the same attempt and may share a row. */
+        fun sameAttempt(a: LabeledEvent, b: LabeledEvent): Boolean =
+            a.event.uid == b.event.uid &&
+                a.event.type == b.event.type &&
+                a.event.destination == b.event.destination &&
+                a.event.port == b.event.port &&
+                a.event.blocked == b.event.blocked &&
+                GuardEvent.isSinkholed(a.event.type, a.event.ips, a.event.ip) ==
+                    GuardEvent.isSinkholed(b.event.type, b.event.ips, b.event.ip)
+
+        /** Collapses consecutive repeats of [events] (in their given order) into runs. */
+        fun collapse(events: List<LabeledEvent>): List<EventRun> {
+            val out = ArrayList<EventRun>()
+            var run = ArrayList<LabeledEvent>()
+            for (e in events) {
+                if (run.isNotEmpty() && !sameAttempt(run.last(), e)) {
+                    out.add(EventRun(run))
+                    run = ArrayList()
+                }
+                run.add(e)
+            }
+            if (run.isNotEmpty()) out.add(EventRun(run))
+            return out
+        }
+    }
+}

@@ -44,6 +44,7 @@ import com.android.settings.biometrics.metrics.BiometricsLogger;
 import com.android.settings.biometrics.metrics.OnboardingEvent;
 import com.android.settings.biometrics.metrics.OnboardingScreenInfoEvent;
 import com.android.settings.core.InstrumentedActivity;
+import com.android.settings.ichthys.ShoalBiometricStyle;
 import com.android.settings.overlay.FeatureFactory;
 import com.android.settings.password.ChooseLockSettingsHelper;
 import com.android.systemui.unfold.compat.ScreenSizeFoldProvider;
@@ -267,6 +268,10 @@ public abstract class BiometricEnrollBase extends InstrumentedActivity {
         super.onPostCreate(savedInstanceState);
         initViews();
 
+        // IchthysOS: Shoal styling (ink ground, fonts, accent illustrations, footer buttons) for
+        // every enrol page, Settings and Setup Wizard variants alike.
+        ShoalBiometricStyle.apply(this, getLayout(), mFooterBarMixin);
+
         if (mShouldSetFooterBarBackground) {
             @SuppressLint("VisibleForTests")
             final LinearLayout buttonContainer = mFooterBarMixin != null
@@ -411,8 +416,9 @@ public abstract class BiometricEnrollBase extends InstrumentedActivity {
 
     @ColorInt
     public int getBackgroundColor() {
-        final ColorStateList stateList = Utils.getColorAttr(this, android.R.attr.windowBackground);
-        return stateList != null ? stateList.getDefaultColor() : Color.TRANSPARENT;
+        // IchthysOS: the pages sit on the Shoal ink ground (ShoalBiometricStyle), not on the Glif
+        // theme's windowBackground; the status bar and footer follow it.
+        return ShoalBiometricStyle.background(this);
     }
 
     protected boolean shouldShowSplitScreenDialog() {

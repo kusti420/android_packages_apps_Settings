@@ -53,10 +53,15 @@
 
         </FrameLayout>
 
-        <!-- Contains the extra information text at the bottom -->
+        <!-- Contains the extra information text at the bottom.
+             IchthysOS: ShoalBiometricStyle draws this block as a Shoal card. -->
         <LinearLayout
+            android:id="@+id/ichthys_enroll_card"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:paddingHorizontal="20dp"
+            android:paddingBottom="20dp"
             android:orientation="vertical">
 
             <!-- How it works -->

@@ -175,6 +175,11 @@ public final class ShoalBadgeDrawable extends Drawable {
         canvas.drawCircle(x0 + mDot / 2f + gap / 2f + r, y0 + mDot + gap + r, r, mDots);
     }
 
+    /** The plain icon this badge wraps (for re-styling when the icon options change). */
+    public Drawable getGlyph() {
+        return mGlyph;
+    }
+
     @Override
     public int getIntrinsicWidth() {
         return Math.round(mSize + mOverhang);

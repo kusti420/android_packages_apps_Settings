@@ -24,6 +24,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -65,6 +66,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.android.settings.ichthys.guard.data.GuardRepository
 import com.android.settings.ichthys.guard.model.ActivityFilter
+import com.android.settings.ichthys.guard.model.EventRun
 import com.android.settings.ichthys.guard.model.EventType
 import com.android.settings.ichthys.guard.model.GuardEvent
 import com.android.settings.ichthys.guard.model.Grouping
@@ -117,6 +119,15 @@ class ActivityViewModel(app: Application) : AndroidViewModel(app) {
     /** Filtered, newest first. */
     val visible: StateFlow<List<LabeledEvent>> =
         combine(repo.events, frozen, filter) { live, snap, f -> f.apply(snap ?: live).reversed() }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /**
+     * IchthysOS: [visible] with consecutive repeats of one attempt collapsed, for the Stream view.
+     * The events themselves stay (export, counts and the other views use [visible]).
+     */
+    val runs: StateFlow<List<EventRun>> =
+        visible
+            .map { EventRun.collapse(it) }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     /** (package, label) of every app present in the event window. */
@@ -215,12 +226,15 @@ private fun LiveLog(
     val paused by avm.paused.collectAsStateWithLifecycle()
     val newCount by avm.newWhilePaused.collectAsStateWithLifecycle()
     val visible by avm.visible.collectAsStateWithLifecycle()
+    val runs by avm.runs.collectAsStateWithLifecycle()
     val apps by avm.appsInEvents.collectAsStateWithLifecycle()
     val status by vm.status.collectAsStateWithLifecycle()
     val t = Guard.tokens
 
     var selected by remember { mutableStateOf<LabeledEvent?>(null) }
     val expanded = remember { mutableStateMapOf<String, Boolean>() }
+    // IchthysOS: which collapsed runs of the Stream are opened, by EventRun.id.
+    val expandedRuns = remember { mutableStateMapOf<Long, Boolean>() }
     val groups = remember(visible, grouping) { group(visible, grouping) }
     val exportCtx = LocalContext.current
     val exportScope = rememberCoroutineScope()
@@ -343,9 +357,38 @@ private fun LiveLog(
         } else {
             LazyColumn(Modifier.fillMaxSize()) {
                 if (grouping == Grouping.NONE) {
-                    items(visible, key = { "e:${it.event.seq}" }) { e ->
-                        EventRow(e, showApp = true, modifier = Modifier.clickable { selected = e })
-                        HorizontalDivider(color = t.hairline, thickness = t.hairlineWidth)
+                    // IchthysOS: an app retrying the same thing is one row ("×7", first – last
+                    // time) that opens to its single attempts; a lone event is a plain row.
+                    for (run in runs) {
+                        if (run.count == 1) {
+                            item(key = "e:${run.head.event.seq}") {
+                                val e = run.head
+                                EventRow(
+                                    e,
+                                    showApp = true,
+                                    modifier = Modifier.clickable { selected = e },
+                                )
+                                HorizontalDivider(color = t.hairline, thickness = t.hairlineWidth)
+                            }
+                            continue
+                        }
+                        val open = expandedRuns[run.id] == true
+                        item(key = "r:${run.id}") {
+                            RunRow(run, open) { expandedRuns[run.id] = !open }
+                        }
+                        if (open) {
+                            items(run.events.take(200), key = { "e:${it.event.seq}" }) { e ->
+                                EventRow(
+                                    e,
+                                    showApp = false,
+                                    modifier =
+                                        Modifier.clickable { selected = e }.padding(start = 12.dp),
+                                )
+                            }
+                        }
+                        item(key = "rd:${run.id}") {
+                            HorizontalDivider(color = t.hairline, thickness = t.hairlineWidth)
+                        }
                     }
                 } else {
                     for (g in groups) {
@@ -411,6 +454,60 @@ private fun AppFilterButton(
                     },
                 )
             }
+        }
+    }
+}
+
+/**
+ * IchthysOS: one row for a run of repeated attempts: the event as [EventRow] shows it, with the
+ * span of time it covers and a "×N" count. Tapping opens the single attempts (each with the
+ * usual actions sheet).
+ */
+@Composable
+private fun RunRow(run: EventRun, open: Boolean, onToggle: () -> Unit) {
+    val t = Guard.tokens
+    val e = run.head
+    Column(
+        Modifier.fillMaxWidth()
+            .clickable(onClick = onToggle)
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(
+                if (open) "▾" else "▸",
+                style = MaterialTheme.typography.bodyMedium.copy(fontFamily = t.mono),
+                color = t.muted,
+            )
+            Text(
+                "${formatClock(run.firstMs)}–${formatClock(run.lastMs)}",
+                style = MaterialTheme.typography.labelSmall.copy(fontFamily = t.mono),
+                color = t.muted,
+            )
+            Text(
+                e.event.destination,
+                style = MaterialTheme.typography.bodyMedium.copy(fontFamily = t.mono),
+                color = if (e.event.blocked) t.muted else t.text,
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Tag("×${run.count}", emphasized = true)
+        }
+        Row(Modifier.padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+            Tag(e.event.type.name)
+            if (e.event.blocked) Tag("BLOCKED", danger = true)
+            if (e.tracker != null) Tag(e.tracker, emphasized = true)
+            if (e.event.port != 0) Tag(":${e.event.port}")
+            Text(
+                e.appLabel,
+                style = MaterialTheme.typography.bodySmall,
+                color = t.muted,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }

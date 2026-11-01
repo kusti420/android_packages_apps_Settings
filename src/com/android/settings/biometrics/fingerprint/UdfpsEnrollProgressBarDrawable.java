@@ -40,6 +40,7 @@ import androidx.annotation.Nullable;
 
 import com.android.internal.annotations.VisibleForTesting;
 import com.android.settings.R;
+import com.android.settings.ichthys.ShoalBiometricStyle;
 
 /**
  * UDFPS enrollment progress bar.
@@ -347,6 +348,12 @@ public class UdfpsEnrollProgressBarDrawable extends Drawable {
         mEnrollProgressHelpWithTalkback = ta.getColor(
                 R.styleable.BiometricsEnrollView_biometricsEnrollProgressHelpWithTalkback, 0);
         ta.recycle();
+        // IchthysOS: the ring takes the Shoal accent instead of the fixed Google blue; the help
+        // and first-touch-error tones keep the stock alpha over it.
+        mEnrollProgress = ShoalBiometricStyle.accent(context);
+        mEnrollProgressHelp = ShoalBiometricStyle.withAlpha(mEnrollProgress, 0x60);
+        mMovingTargetFill = ShoalBiometricStyle.accentFill(context);
+        mMovingTargetFillError = ShoalBiometricStyle.withAlpha(mMovingTargetFill, 0x80);
     }
 
     @Override

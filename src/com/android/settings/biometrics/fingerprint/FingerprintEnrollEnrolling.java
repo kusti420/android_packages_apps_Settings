@@ -77,6 +77,7 @@ import com.android.settings.biometrics.BiometricsSplitScreenDialog;
 import com.android.settings.biometrics.fingerprint.feature.SfpsEnrollmentFeature;
 import com.android.settings.core.instrumentation.InstrumentedDialogFragment;
 import com.android.settings.flags.Flags;
+import com.android.settings.ichthys.ShoalBiometricStyle;
 import com.android.settings.overlay.FeatureFactory;
 import com.android.settingslib.display.DisplayDensityUtils;
 import com.android.systemui.unfold.compat.ScreenSizeFoldProvider;
@@ -789,6 +790,8 @@ public class FingerprintEnrollEnrolling extends BiometricsEnrollEnrolling {
         if (mCanAssumeSfps) {
             mSfpsEnrollmentFeature.handleOnEnrollmentLottieComposition(view);
         }
+        // IchthysOS: a new composition drops the accent tint; apply it again.
+        ShoalBiometricStyle.tintLottie(view);
         // IchthysOS: an earlier change translated the lottie down to overlap the sensor. That put
         // the guidance illustration at the bottom edge of the screen (measured translationY=868,
         // onScreenY=1856) and left the whole content area empty. The illustration belongs in the

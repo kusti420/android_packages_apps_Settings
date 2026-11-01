@@ -73,10 +73,13 @@ enum class GuardTab(val label: String, val glyph: String) {
  * on the Lockdown / Pause tiles.
  *
  * Intents: an explicit launch from Settings itself, optionally with
- * [GuardNotifications.EXTRA_OPEN_PACKAGE] or [Intent.EXTRA_PACKAGE_NAME] to open one app's page.
+ * [GuardNotifications.EXTRA_OPEN_PACKAGE] or [Intent.EXTRA_PACKAGE_NAME] to open one app's page,
+ * or with [EXTRA_OPEN_PAGE] = [OPEN_PAGE_SHARED_VALUES] to open Rules > Shared values (the Weather
+ * page's Location row).
  */
 class GuardActivity : ComponentActivity() {
     private val openPackage = mutableStateOf<String?>(null)
+    private val openPage = mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
@@ -108,6 +111,14 @@ class GuardActivity : ComponentActivity() {
                 openPackage.value?.let {
                     stack = "a:$it"
                     openPackage.value = null
+                }
+                openPage.value?.let {
+                    // IchthysOS: Shared values sits under Rules; land there so Back is sensible.
+                    if (it == OPEN_PAGE_SHARED_VALUES) {
+                        tab = GuardTab.RULES
+                        stack = PAGE_SHARED_VALUES
+                    }
+                    openPage.value = null
                 }
                 BackHandler(enabled = pages.isNotEmpty()) { pop() }
                 BackHandler(enabled = pages.isEmpty() && tab != GuardTab.HOME) {
@@ -235,11 +246,21 @@ class GuardActivity : ComponentActivity() {
         private const val PAGE_AUTOMATION = "s:automation"
         private const val PAGE_SHARED_VALUES = "s:shared"
 
+        /** IchthysOS: which page to open on top of the tabs; only [OPEN_PAGE_SHARED_VALUES]. */
+        const val EXTRA_OPEN_PAGE = "com.android.settings.ichthys.guard.extra.OPEN_PAGE"
+        const val OPEN_PAGE_SHARED_VALUES = "shared_values"
+
         /** Opens Guard at [packageName]'s page (the stock App info page's Guard row). */
         @JvmStatic
         fun appIntent(context: Context, packageName: String): Intent =
             Intent(context, GuardActivity::class.java)
                 .putExtra(Intent.EXTRA_PACKAGE_NAME, packageName)
+
+        /** Opens Guard at Rules > Shared values (home city, trips, units). */
+        @JvmStatic
+        fun sharedValuesIntent(context: Context): Intent =
+            Intent(context, GuardActivity::class.java)
+                .putExtra(EXTRA_OPEN_PAGE, OPEN_PAGE_SHARED_VALUES)
     }
 
     private fun handleIntent(intent: Intent?) {
@@ -247,5 +268,6 @@ class GuardActivity : ComponentActivity() {
             intent?.getStringExtra(GuardNotifications.EXTRA_OPEN_PACKAGE)
                 ?: intent?.getStringExtra(Intent.EXTRA_PACKAGE_NAME)
         pkg?.let { openPackage.value = it }
+        intent?.getStringExtra(EXTRA_OPEN_PAGE)?.let { openPage.value = it }
     }
 }

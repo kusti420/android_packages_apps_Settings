@@ -115,6 +115,8 @@ public class SettingsHomepageActivity extends FragmentActivity implements
     private Set<HomepageLoadedListener> mLoadedListeners;
     private boolean mIsEmbeddingActivityEnabled;
     private boolean mIsTwoPane;
+    /** IchthysOS: ShoalStyle.iconStamp when this page last bound or paused. */
+    private String mShoalIconStamp;
     // A regular layout shows icons on homepage, whereas a simplified layout doesn't.
     private boolean mIsRegularLayout = true;
 
@@ -263,6 +265,7 @@ public class SettingsHomepageActivity extends FragmentActivity implements
 
         initSearchBarView();
         com.android.settings.ichthys.ShoalStyle.styleHomepageHeader(this);
+        mShoalIconStamp = com.android.settings.ichthys.ShoalStyle.iconStamp(this);
 
         getLifecycle().addObserver(new HideNonSystemOverlayMixin(this));
         mCategoryMixin = new CategoryMixin(this);
@@ -320,6 +323,24 @@ public class SettingsHomepageActivity extends FragmentActivity implements
             mCallback = new SplitInfoCallback(this);
             mSplitControllerAdapter.addSplitListener(this, Runnable::run, mCallback);
         }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // IchthysOS: the Theme Studio changed the icon tiles / tile colour while this page sat
+        // behind it; its badges are baked into the bound rows, so rebuild the page.
+        final String stamp = com.android.settings.ichthys.ShoalStyle.iconStamp(this);
+        if (mShoalIconStamp != null && !mShoalIconStamp.equals(stamp)) {
+            mShoalIconStamp = stamp;
+            recreate();
+        }
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        mShoalIconStamp = com.android.settings.ichthys.ShoalStyle.iconStamp(this);
     }
 
     @Override

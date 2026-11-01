@@ -183,6 +183,9 @@ public class SettingsActivity extends SettingsBaseActivity
     private int mInitialTitleResId;
 
     private boolean mBatteryPresent = true;
+    /** IchthysOS: ShoalStyle.iconStamp when this activity last paused (null until then). */
+    private String mShoalIconStamp;
+
     private final BroadcastReceiver mBatteryInfoReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
@@ -640,12 +643,21 @@ public class SettingsActivity extends SettingsBaseActivity
         registerReceiver(mBatteryInfoReceiver, new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
 
         updateTilesList();
+
+        // IchthysOS: pages badge their icons when they bind (ShoalStyle.badgeAll), so a page that
+        // waited behind the Theme Studio while the icon tiles / tile colour changed is rebuilt.
+        final String stamp = com.android.settings.ichthys.ShoalStyle.iconStamp(this);
+        if (mShoalIconStamp != null && !mShoalIconStamp.equals(stamp)) {
+            mShoalIconStamp = stamp;
+            recreate();
+        }
     }
 
     @Override
     protected void onPause() {
         super.onPause();
         unregisterReceiver(mBatteryInfoReceiver);
+        mShoalIconStamp = com.android.settings.ichthys.ShoalStyle.iconStamp(this);
     }
 
     @Override

@@ -106,6 +106,17 @@ public final class ShoalStyle {
         return Settings.Secure.getInt(context.getContentResolver(), KEY_BADGES, 1) != 0;
     }
 
+    /**
+     * The icon options (tiles on/off, mono/colour) as one string. Icons are badged when a page
+     * binds and the badge replaces the preference's icon, so a page that stays alive behind the
+     * Theme Studio (the homepage, the hub) keeps the old look until it is rebuilt: activities
+     * compare this stamp across pause/resume and recreate() when it changed.
+     */
+    public static String iconStamp(Context context) {
+        return (badgesEnabled(context) ? "tiles" : "plain") + "/"
+                + (monoBadges(context) ? "mono" : "colour");
+    }
+
     /** The theme accent (from Monet / the ichthys.nix accent). */
     public static int accent(Context context) {
         final TypedArray a = context.obtainStyledAttributes(
@@ -194,15 +205,33 @@ public final class ShoalStyle {
         if (group == null || !badgesEnabled(group.getContext())) {
             return;
         }
+        rebadgeAll(group, color);
+    }
+
+    /**
+     * Re-styles every icon under {@code group} for the current icon options: badges are rebuilt
+     * (mono/colour) from their plain glyph, or unwrapped back to it when tiles are off.
+     */
+    public static void rebadgeAll(androidx.preference.PreferenceGroup group, int color) {
+        if (group == null) {
+            return;
+        }
         final Context c = group.getContext();
+        final boolean tiles = badgesEnabled(c);
         for (int i = 0; i < group.getPreferenceCount(); i++) {
             final androidx.preference.Preference p = group.getPreference(i);
             final Drawable icon = p.getIcon();
-            if (icon != null && !(icon instanceof ShoalBadgeDrawable)) {
-                p.setIcon(badge(c, icon, color));
+            if (icon != null) {
+                final Drawable glyph = icon instanceof ShoalBadgeDrawable
+                        ? ((ShoalBadgeDrawable) icon).getGlyph() : icon;
+                if (tiles) {
+                    p.setIcon(badge(c, glyph, color));
+                } else if (icon != glyph) {
+                    p.setIcon(glyph);
+                }
             }
             if (p instanceof androidx.preference.PreferenceGroup) {
-                badgeAll((androidx.preference.PreferenceGroup) p, color);
+                rebadgeAll((androidx.preference.PreferenceGroup) p, color);
             }
         }
     }
