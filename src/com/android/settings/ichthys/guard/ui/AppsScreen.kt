@@ -74,6 +74,7 @@ fun AppsScreen(vm: GuardViewModel, nav: GuardNav, modifier: Modifier = Modifier)
     val denyNow by repo.denyNow.collectAsStateWithLifecycle()
     val blockedToday by vm.blockedTodayByApp.collectAsStateWithLifecycle()
     val verify by repo.verify.collectAsStateWithLifecycle()
+    val unfinished by repo.unfinishedReviews.collectAsStateWithLifecycle()
     val status by vm.status.collectAsStateWithLifecycle()
     val tick = rememberSettingsTick(ShieldTable.OBSERVED_URIS)
     var query by rememberSaveable { mutableStateOf("") }
@@ -85,7 +86,7 @@ fun AppsScreen(vm: GuardViewModel, nav: GuardNav, modifier: Modifier = Modifier)
     val now = System.currentTimeMillis()
 
     val rows =
-        remember(apps, policies, denyNow, blockedToday, tick, query, chip, status, quarantined, lastVerified) {
+        remember(apps, policies, denyNow, blockedToday, tick, query, chip, status, quarantined, lastVerified, unfinished) {
             apps
                 .filter { a ->
                     (chip == AppChip.SYSTEM || !a.isSystem) &&
@@ -98,7 +99,7 @@ fun AppsScreen(vm: GuardViewModel, nav: GuardNav, modifier: Modifier = Modifier)
                     // Verified: a run for the app itself, or a passed "Verify my protection" run
                     // whose stand-in was this app's preset (same lists, same rule).
                     val verified = lastVerified[a.packageName] ?: presetVerified[p.preset]
-                    AppRow(a, rowState(repo, a, p, denyNow[a.uid], blockedToday[a.packageName] ?: 0, a.packageName in quarantined, verified, status.pausedUntil > now))
+                    AppRow(a, rowState(repo, a, p, denyNow[a.uid], blockedToday[a.packageName] ?: 0, a.packageName in quarantined, verified, status.pausedUntil > now, a.packageName in unfinished))
                 }
                 .filter { r ->
                     when (chip) {
@@ -199,11 +200,14 @@ data class RowState(
     val differs: Boolean,
     val location: LocationMode,
     val paused: Boolean,
+    /** IchthysOS: quarantined, and its first-launch review was closed without a choice. */
+    val reviewUnfinished: Boolean = false,
 ) {
     val line: String
         get() =
             buildList {
                     when {
+                        quarantined && reviewUnfinished -> add("Quarantined · review not finished")
                         quarantined -> add("Quarantined · pick a preset to release")
                         policy.dormant -> add("Asleep · unused for weeks, no network")
                         offline != null -> add("Blocked now · ${offline.sentence}")
@@ -233,6 +237,7 @@ private fun rowState(
     quarantined: Boolean,
     verifiedMs: Long?,
     paused: Boolean,
+    reviewUnfinished: Boolean,
 ): RowState {
     // IchthysOS: the service's deny chain is the truth; without it, the saved rule.
     val offline =
@@ -249,6 +254,7 @@ private fun rowState(
         differs = policy.preset != AppPreset.CUSTOM && repo.presetDifferences(app.packageName).isNotEmpty(),
         location = repo.locationMode(app.packageName),
         paused = paused,
+        reviewUnfinished = reviewUnfinished,
     )
 }
 

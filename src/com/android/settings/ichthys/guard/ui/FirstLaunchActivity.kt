@@ -76,6 +76,7 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.lifecycleScope
 import com.android.settings.R
 import com.android.settings.ichthys.guard.data.GuardRepository
 import com.android.settings.ichthys.guard.model.AdviceLine
@@ -103,16 +104,28 @@ import kotlinx.coroutines.withContext
  *
  * It shows the install-time tracker scan, the requested permissions and a recommended profile
  * ([FirstLaunchAdvisor]). Each button sets the policy, lifts Settings' suspension and starts the
- * app; back or a tap outside the sheet leaves it quarantined.
+ * app; back or a tap outside the sheet leaves it quarantined. IchthysOS: there is no "open as is":
+ * the way out is the recommendation, a preset or Customize. A review closed without a choice is
+ * marked unfinished (GuardRepository.markReviewUnfinished): the journal, Guard's app list and a
+ * silent notification say so, and the sheet says so when it opens again.
  *
- * Apps auto-tightened after weeks unused (GuardRepository.runMaintenance) are suspended the same
- * way, so reopening one lands here too; every choice gives it its network back.
+ * IchthysOS: apps asleep after weeks unused (GuardRepository.runMaintenance) are no longer
+ * suspended, so they don't come here; one still suspended from before is woken and opened
+ * without a review.
  *
  * Exported only because the contract requires it: the activity is protected by the signature
  * permission SEND_SHOW_SUSPENDED_APP_DETAILS, which SuspendedAppActivity checks for before it
  * offers the button. Not direct-boot aware (Guard's state is credential-protected).
  */
 class FirstLaunchActivity : ComponentActivity() {
+
+    /** IchthysOS: the review on screen, once loaded (only a loaded review can be unfinished). */
+    private var loaded: SheetData? = null
+    /** IchthysOS: a button was pressed; leaving after that isn't an unfinished review. */
+    private var choiceMade = false
+    /** IchthysOS: the unfinished mark was written / its notification posted by this instance. */
+    private var marked = false
+    private var notified = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
@@ -125,15 +138,65 @@ class FirstLaunchActivity : ComponentActivity() {
             finish()
             return
         }
-        setContent {
-            GuardTheme {
-                FirstLaunchSheet(
-                    pkg,
-                    onDismiss = { finish() },
-                    onChoice = { sheet, choice, preset -> release(sheet, choice, preset) },
-                )
+        lifecycleScope.launch {
+            // IchthysOS: an app asleep for being unused that is still suspended from before sleep
+            // stopped suspending: wake it and open it, no review (the owner's call).
+            val (woken, appIntent) = withContext(Dispatchers.IO) { wakeIfAsleep(pkg) }
+            if (woken) {
+                appIntent?.let { startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                finish()
+                return@launch
+            }
+            setContent {
+                GuardTheme {
+                    FirstLaunchSheet(
+                        pkg,
+                        onLoaded = { loaded = it },
+                        onDismiss = { finish() },
+                        onChoosing = { choiceMade = true },
+                        onChoice = { sheet, choice, preset -> release(sheet, choice, preset) },
+                    )
+                }
             }
         }
+    }
+
+    /**
+     * IchthysOS: wakes [pkg] when it is asleep (dormant) and not in the first-launch quarantine,
+     * with its launch intent; (false, null) when the review applies. Off the main thread.
+     */
+    private fun wakeIfAsleep(pkg: String): Pair<Boolean, Intent?> {
+        val repo = GuardRepository.get(this)
+        if (!repo.policies.value.policyFor(pkg).dormant) return false to null
+        if (runCatching { packageManager.isPackageQuarantined(pkg) }.getOrDefault(true))
+            return false to null
+        repo.restoreDormant(pkg)
+        return true to packageManager.getLaunchIntentForPackage(pkg)
+    }
+
+    // IchthysOS: leaving a loaded review without a choice marks it unfinished. Back and a tap on
+    // the scrim finish the activity (stop while finishing): marked and notified. Leaving it
+    // otherwise (home, another app, the screen going off) only marks it, in case the user comes
+    // back to it; the notification follows if the sheet is then destroyed unused. A configuration
+    // change doesn't count (the manifest handles rotation itself anyway).
+    override fun onStop() {
+        super.onStop()
+        if (!isChangingConfigurations) noteUnfinished(notify = isFinishing)
+    }
+
+    override fun onDestroy() {
+        if (!isChangingConfigurations) noteUnfinished(notify = true)
+        super.onDestroy()
+    }
+
+    private fun noteUnfinished(notify: Boolean) {
+        val sheet = loaded ?: return
+        if (choiceMade || notified || (!notify && marked)) return
+        marked = true
+        notified = notify
+        val pkg = sheet.facts.packageName
+        // Prefs, journal file and a binder call: off the main thread. The repository outlives us.
+        Thread({ sheet.repo.markReviewUnfinished(pkg, notify) }, "IchthysGuardReview").start()
     }
 
     /** Writes the policy for [choice], lifts the quarantine and starts the app. Main thread. */
@@ -147,28 +210,23 @@ class FirstLaunchActivity : ComponentActivity() {
                     sheet.repo.applyPreset(pkg, preset)
                 } else if (choice == SheetChoice.APPLY) {
                     // The same path the app page uses: store, OS allowlists and the service. A
-                    // new app has no policy yet, so the recommendation becomes it. IchthysOS: any
-                    // app with choices already (paused by auto-tighten, or blocked from the
-                    // new-app notification before it was opened) keeps what the user set up;
-                    // only the recommendation is merged in and a pause lifted.
+                    // new app has no policy yet, so the recommendation becomes it. IchthysOS: an
+                    // app with choices already (blocked from the new-app notification before it
+                    // was opened) keeps what the user set up; only the recommendation is merged.
                     sheet.repo.updatePolicy(pkg) { old ->
                         if (old.isDefault) sheet.recommendation.policy
                         else sheet.recommendation.mergedInto(old)
                     }
                 }
-                // An app auto-tightened for being unused (also suspended by Settings) gets its
-                // network back with any choice: the user just opened it.
-                if (sheet.repo.policies.value.policyFor(pkg).dormant) {
-                    sheet.repo.updatePolicy(pkg) { it.copy(dormant = false) }
-                }
                 if (!unsuspend(pkg)) return@withContext false to null
+                // IchthysOS: released, so the review is finished whatever it was before.
+                sheet.repo.clearUnfinishedReview(pkg)
                 sheet.repo.journal(
                     JournalKind.RELEASED,
                     when {
-                        preset != null && preset != AppPreset.CUSTOM -> "Released with the ${preset.label} preset"
-                        choice == SheetChoice.APPLY -> "Released with the recommendation"
                         choice == SheetChoice.CUSTOMIZE -> "Released to set up by hand"
-                        else -> "Released as is"
+                        preset != null && preset != AppPreset.CUSTOM -> "Released with the ${preset.label} preset"
+                        else -> "Released with the recommendation"
                     },
                     pkg,
                 )
@@ -231,7 +289,6 @@ class FirstLaunchActivity : ComponentActivity() {
 private enum class SheetChoice {
     APPLY,
     CUSTOMIZE,
-    AS_IS,
 }
 
 /** Everything the sheet shows, gathered off the main thread. */
@@ -243,8 +300,8 @@ private class SheetData(
     val facts: AppFacts,
     val groups: List<PermissionGroup>,
     val recommendation: Recommendation,
-    /** Paused by auto-tighten (it has run before), not a new app. */
-    val dormant: Boolean,
+    /** IchthysOS: the user closed this app's review before without a choice. */
+    val unfinished: Boolean,
 )
 
 private fun loadSheet(ctx: Context, pkg: String): SheetData? {
@@ -271,7 +328,7 @@ private fun loadSheet(ctx: Context, pkg: String): SheetData? {
         facts,
         PermissionGroup.of(requested),
         FirstLaunchAdvisor.recommend(facts),
-        repo.policies.value.policyFor(pkg).dormant,
+        repo.isReviewUnfinished(pkg),
     )
 }
 
@@ -316,7 +373,9 @@ private fun Drawable.toImageBitmap(px: Int): ImageBitmap {
 @Composable
 private fun FirstLaunchSheet(
     pkg: String,
+    onLoaded: (SheetData) -> Unit,
     onDismiss: () -> Unit,
+    onChoosing: () -> Unit,
     onChoice: suspend (SheetData, SheetChoice, AppPreset?) -> Unit,
 ) {
     val t = Guard.tokens
@@ -324,7 +383,7 @@ private fun FirstLaunchSheet(
     val sheet by
         produceState<SheetData?>(null, pkg) {
             value = withContext(Dispatchers.IO) { loadSheet(ctx, pkg) }
-            if (value == null) onDismiss() // uninstalled meanwhile
+            value?.let(onLoaded) ?: onDismiss() // uninstalled meanwhile
         }
     var busy by remember { mutableStateOf(false) }
     // IchthysOS: the preset the main button applies; starts at the recommendation's.
@@ -357,6 +416,7 @@ private fun FirstLaunchSheet(
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     val s = sheet
+                    if (s?.unfinished == true) UnfinishedBanner()
                     Header(s, pkg)
                     if (s == null) {
                         Text(
@@ -380,11 +440,30 @@ private fun FirstLaunchSheet(
                     onChoice = { choice ->
                         val s = sheet ?: return@Buttons
                         busy = true
+                        onChoosing()
                         scope.launch { onChoice(s, choice, preset ?: s.recommendation.preset) }
                     },
                 )
             }
         }
+    }
+}
+
+/** IchthysOS: the review was left unfinished before; the only ways out are the buttons. */
+@Composable
+private fun UnfinishedBanner() {
+    val t = Guard.tokens
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(t.radiusSmall),
+        color = t.accentTint,
+    ) {
+        Text(
+            stringResource(R.string.ichthys_guard_first_launch_unfinished),
+            style = MaterialTheme.typography.bodyMedium,
+            color = t.text,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+        )
     }
 }
 
@@ -419,12 +498,8 @@ private fun Header(s: SheetData?, pkg: String) {
             }
         }
     }
-    // IchthysOS: an app paused by auto-tighten has run before; don't call it new.
     Text(
-        stringResource(
-            if (s?.dormant == true) R.string.ichthys_guard_first_launch_intro_dormant
-            else R.string.ichthys_guard_first_launch_intro
-        ),
+        stringResource(R.string.ichthys_guard_first_launch_intro),
         style = MaterialTheme.typography.bodyMedium,
         color = t.muted,
     )
@@ -541,21 +616,14 @@ private fun Buttons(enabled: Boolean, applyLabel: String?, onChoice: (SheetChoic
         ) {
             Text(applyLabel ?: stringResource(R.string.ichthys_guard_first_launch_apply))
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(
-                onClick = { onChoice(SheetChoice.CUSTOMIZE) },
-                enabled = enabled,
-                modifier = Modifier.weight(1f),
-            ) {
-                Text(stringResource(R.string.ichthys_guard_first_launch_customize))
-            }
-            OutlinedButton(
-                onClick = { onChoice(SheetChoice.AS_IS) },
-                enabled = enabled,
-                modifier = Modifier.weight(1f),
-            ) {
-                Text(stringResource(R.string.ichthys_guard_first_launch_as_is))
-            }
+        // IchthysOS: no "Open as-is": a new app opens with the recommendation, a preset or
+        // Customize, never without a choice.
+        OutlinedButton(
+            onClick = { onChoice(SheetChoice.CUSTOMIZE) },
+            enabled = enabled,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(stringResource(R.string.ichthys_guard_first_launch_customize))
         }
     }
 }

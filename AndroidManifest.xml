@@ -6403,8 +6403,21 @@
                 <action android:name="android.intent.action.TIMEZONE_CHANGED" />
             </intent-filter>
         </receiver>
+        <!-- IchthysOS Guard: an uninstall clears the app's unfinished first-launch review
+             (mark and notification). PACKAGE_FULLY_REMOVED is protected and exempt from the
+             implicit-broadcast limits. -->
+        <receiver
+            android:name=".ichthys.guard.notify.PackageRemovedReceiver"
+            android:exported="true"
+            android:directBootAware="false">
+            <intent-filter>
+                <action android:name="android.intent.action.PACKAGE_FULLY_REMOVED" />
+                <data android:scheme="package" />
+            </intent-filter>
+        </receiver>
         <!-- Explicit broadcast from IchthysGuardService (system_server) after an install-time
-             scan. NETWORK_STACK is signature-level and held by system_server, so no app can
+             scan (IchthysOS: also behaviour alerts, and ACTION_WOKE when an asleep app is opened).
+             NETWORK_STACK is signature-level and held by system_server, so no app can
              forge it. -->
         <receiver
             android:name=".ichthys.guard.notify.AppScannedReceiver"

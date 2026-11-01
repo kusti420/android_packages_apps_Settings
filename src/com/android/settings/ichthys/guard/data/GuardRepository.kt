@@ -181,6 +181,15 @@ class GuardRepository(
     /** IchthysOS: verification runs (IchthysProbe launched by Guard), newest first. */
     val verify: StateFlow<VerifyHistory> = _verify.asStateFlow()
 
+    /** IchthysOS: guards every read-modify-write of the unfinished-review marks in [prefs]. */
+    private val reviewLock = Any()
+    private val _unfinishedReviews = MutableStateFlow(readReviewMarks(prefs).keys)
+    /**
+     * IchthysOS: quarantined new apps whose first-launch review was closed without a choice
+     * (FirstLaunchActivity). Shown as "review not finished" until the app is released or removed.
+     */
+    val unfinishedReviews: StateFlow<Set<String>> = _unfinishedReviews.asStateFlow()
+
     private val _blocked = MutableStateFlow<Map<Int, BlockedCounter>>(emptyMap())
     /** IchthysOS: uid → blocked attempts since boot (service counters). */
     val blockedCounters: StateFlow<Map<Int, BlockedCounter>> = _blocked.asStateFlow()
@@ -270,6 +279,8 @@ class GuardRepository(
     fun start() {
         scope.launch {
             refreshApps()
+            // IchthysOS: drop review marks of apps removed or released while Settings was away.
+            pruneUnfinishedReviews()
             migrateSavedSensorExemptions()
             syncOsListsFromSettings()
             observeOsLists()
@@ -881,9 +892,10 @@ class GuardRepository(
 
     /**
      * Auto-tighten (W8b decision 18): a user app unused for [AutomationSettings.autoTightenDays]
-     * loses its network ([AppPolicy.dormant]) and is suspended with Settings as the suspender, so
-     * opening it shows the suspended-app dialog whose Review button opens Guard's first-launch
-     * sheet (FirstLaunchActivity), which lifts both. Daily, off the main thread.
+     * loses its network ([AppPolicy.dormant]). IchthysOS: it is not suspended any more (the owner
+     * doesn't want an app reviewed again just for being unused): opening it brings it to the top,
+     * IchthysGuardService gives the uid its network back at once and tells Settings
+     * (ACTION_WOKE, [wakeOpened]). Daily, off the main thread.
      *
      * Off by default. "Unused" means nothing of the app ran for the user ([lastActiveMs]), and an
      * app that works without being opened is never paused ([backgroundRoles], [worksUnopened]).
@@ -930,7 +942,6 @@ class GuardRepository(
             // Binder calls per app, so only for the few that got this far.
             if (worksUnopened(pkg)) continue
             updatePolicy(pkg) { it.copy(dormant = true) }
-            suspendDormant(pkg, app.label, auto.autoTightenDays)
             journal(JournalKind.SLEEP, "Unused for ${auto.autoTightenDays} days", pkg)
             tightened += app.label
         }
@@ -1059,39 +1070,34 @@ class GuardRepository(
         return out
     }
 
-    private fun suspendDormant(pkg: String, label: String, days: Int) {
-        val dialog =
-            SuspendDialogInfo.Builder()
-                .setTitle("$label is paused")
-                .setMessage(
-                    "You haven't used $label for $days days, so Guard cut its network. Review " +
-                        "it to use it again."
-                )
-                .setNeutralButtonText("Review")
-                .setNeutralButtonAction(SuspendDialogInfo.BUTTON_ACTION_MORE_DETAILS)
-                .build()
-        try {
-            context.packageManager.setPackagesSuspended(arrayOf(pkg), true, null, null, dialog)
-        } catch (e: RuntimeException) {
-            Log.w(TAG, "could not pause $pkg", e)
-        }
-    }
-
     /** Undoes auto-tighten: network back to the app's own policy, suspension lifted. */
     fun restoreDormant(pkg: String) {
         if (_policies.value.policyFor(pkg).dormant) journal(JournalKind.WAKE, null, pkg)
         updatePolicy(pkg) { it.copy(dormant = false) }
+        // IchthysOS: sleep no longer suspends; this only lifts a suspension left from before
+        // (IchthysGuardService also lifts those at boot). Never a first-launch quarantine, which
+        // is Settings' suspension too.
+        val pm = context.packageManager
+        if (
+            !runCatching { pm.isPackageSuspended(pkg) }.getOrDefault(false) ||
+                runCatching { pm.isPackageQuarantined(pkg) }.getOrDefault(true)
+        )
+            return
         try {
-            context.packageManager.setPackagesSuspended(
-                arrayOf(pkg),
-                false,
-                null,
-                null,
-                null as SuspendDialogInfo?,
-            )
+            pm.setPackagesSuspended(arrayOf(pkg), false, null, null, null as SuspendDialogInfo?)
         } catch (e: RuntimeException) {
             Log.w(TAG, "could not resume $pkg", e)
         }
+    }
+
+    /**
+     * IchthysOS: IchthysGuardService saw [pkg]'s uid come to the top while asleep and has already
+     * lifted the deny (ACTION_WOKE): clear the sleep so the app's own rule is pushed again.
+     */
+    fun wakeOpened(pkg: String) {
+        if (!_policies.value.policyFor(pkg).dormant) return
+        journal(JournalKind.WAKE, "Opened again", pkg)
+        updatePolicy(pkg) { it.copy(dormant = false) }
     }
 
     // ---- fresh identity -------------------------------------------------------------------
@@ -1395,6 +1401,61 @@ class GuardRepository(
         }
     }
 
+    // ---- first-launch review ----------------------------------------------------------------
+
+    fun isReviewUnfinished(pkg: String): Boolean = pkg in _unfinishedReviews.value
+
+    /**
+     * IchthysOS: the first-launch review of [pkg] was closed without a choice (back, a tap outside
+     * the sheet, or the sheet going away). The mark is tied to the install (firstInstallTime), so
+     * a reinstall starts clean. The first mark of an install goes to the journal; [notify] also
+     * posts (or re-posts) the "review not finished" notification. Off the main thread.
+     */
+    fun markReviewUnfinished(pkg: String, notify: Boolean) {
+        val pm = context.packageManager
+        val installed = installTime(pm, pkg) ?: return
+        // Only a first-launch review: the app is still in Guard's quarantine.
+        if (!runCatching { pm.isPackageQuarantined(pkg) }.getOrDefault(false)) return
+        val first: Boolean
+        synchronized(reviewLock) {
+            val marks = readReviewMarks(prefs)
+            first = marks[pkg] != installed
+            if (first) writeReviewMarks(prefs, marks + (pkg to installed))
+            _unfinishedReviews.value = readReviewMarks(prefs).keys
+        }
+        if (first) journal(JournalKind.REVIEW_UNFINISHED, "Review closed without picking a preset", pkg)
+        if (notify) {
+            GuardNotifications.notifyReviewUnfinished(context, pkg, appFor(pkg)?.label ?: pkg)
+        }
+    }
+
+    /**
+     * IchthysOS: the app was released (any choice, any path) or removed: drops its
+     * unfinished-review mark and notification. Any thread.
+     */
+    fun clearUnfinishedReview(pkg: String) {
+        synchronized(reviewLock) {
+            val marks = readReviewMarks(prefs)
+            if (pkg in marks) writeReviewMarks(prefs, marks - pkg)
+            _unfinishedReviews.value = readReviewMarks(prefs).keys
+        }
+        GuardNotifications.cancelReviewUnfinished(context, pkg)
+    }
+
+    /**
+     * IchthysOS: forgets marks whose app is gone, was reinstalled, or is no longer quarantined
+     * (released while Settings wasn't running, or by the service). Off the main thread.
+     */
+    fun pruneUnfinishedReviews() {
+        val pm = context.packageManager
+        val stale =
+            readReviewMarks(prefs).filter { (pkg, installed) ->
+                installTime(pm, pkg) != installed ||
+                    !runCatching { pm.isPackageQuarantined(pkg) }.getOrDefault(false)
+            }
+        for (pkg in stale.keys) clearUnfinishedReview(pkg)
+    }
+
     /**
      * IchthysOS: the context the Settings lists are read with (the UI's helpers share it so the
      * list reads happen against the same user as the writes).
@@ -1473,6 +1534,11 @@ class GuardRepository(
         private const val KEY_PAUSED_UNTIL = "paused_until"
         private const val KEY_SENSORS_MIGRATED = "sensor_exemptions_migrated"
         private const val KEY_LOCKDOWN_SEEDED = "lockdown_allowlist_seeded"
+        /**
+         * IchthysOS: first-launch reviews closed without a choice, as "package/firstInstallTime"
+         * (see [markReviewUnfinished]).
+         */
+        private const val KEY_REVIEW_UNFINISHED = "review_unfinished"
         /** IchthysOS: the schedules active at the last tick, for the journal's start/end lines. */
         private const val KEY_ACTIVE_SCHEDULES = "active_schedules"
         /** The tester app Guard launches for a verification run; user-installed only. */
@@ -1483,6 +1549,43 @@ class GuardRepository(
             listOf("dialer", "messaging", "contacts", "signal", "org.ichthys")
 
         fun newId(): String = UUID.randomUUID().toString().substring(0, 8)
+
+        /** IchthysOS: package → firstInstallTime of every unfinished first-launch review. */
+        private fun readReviewMarks(prefs: SharedPreferences): Map<String, Long> =
+            prefs.getStringSet(KEY_REVIEW_UNFINISHED, null).orEmpty().mapNotNull { e ->
+                val pkg = e.substringBeforeLast('/', "")
+                val installed = e.substringAfterLast('/').toLongOrNull()
+                if (pkg.isEmpty() || installed == null) null else pkg to installed
+            }.toMap()
+
+        private fun writeReviewMarks(prefs: SharedPreferences, marks: Map<String, Long>) {
+            prefs
+                .edit()
+                .putStringSet(KEY_REVIEW_UNFINISHED, marks.map { (p, t) -> "$p/$t" }.toSet())
+                .apply()
+        }
+
+        private fun installTime(pm: PackageManager, pkg: String): Long? =
+            try {
+                pm.getPackageInfo(pkg, PackageManager.PackageInfoFlags.of(0)).firstInstallTime
+            } catch (ignored: PackageManager.NameNotFoundException) {
+                null
+            }
+
+        /**
+         * IchthysOS: whether [pkg] has an unfinished-review mark, read straight from Guard's
+         * preferences, so a package-removed broadcast doesn't start the whole repository for the
+         * common case of an app without one.
+         */
+        @JvmStatic
+        fun hasUnfinishedReview(context: Context, pkg: String): Boolean =
+            instance?.isReviewUnfinished(pkg)
+                ?: (pkg in
+                    readReviewMarks(
+                        context.applicationContext
+                            .createCredentialProtectedStorageContext()
+                            .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                    ))
 
         /**
          * IchthysOS: Guard runs for the system user only. IchthysGuardService holds one

@@ -82,7 +82,13 @@ enum class JournalKind(val code: Int, val label: String) {
     LAN_APPLIED(16, "Local network"),
     RULES_RESTORED(17, "Rules restored"),
     SERVICE_START(18, "Service started"),
-    WAKE(19, "Woken");
+    WAKE(19, "Woken"),
+    /**
+     * IchthysOS: a quarantined new app's first-launch review was closed without a choice. Written
+     * by Settings only (not yet mirrored as a GuardEvent.JOURNAL_* constant); the service stores
+     * any code.
+     */
+    REVIEW_UNFINISHED(20, "Review not finished");
 
     /** Entries that mean something went wrong; shown in the danger colour. */
     val isWarning: Boolean

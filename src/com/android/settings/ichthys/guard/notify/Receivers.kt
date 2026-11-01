@@ -52,9 +52,32 @@ class PackageAddedReceiver : BroadcastReceiver() {
 }
 
 /**
+ * IchthysOS: an app was uninstalled: drops its unfinished first-launch review mark and
+ * notification. PACKAGE_FULLY_REMOVED is exempt from the implicit-broadcast limits, so this
+ * manifest receiver runs even when Settings isn't; the repository is only started when the app
+ * had a mark.
+ */
+class PackageRemovedReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action != Intent.ACTION_PACKAGE_FULLY_REMOVED) return
+        if (!GuardRepository.isGuardUser()) return
+        // Guard's state is credential-protected.
+        if (context.getSystemService(UserManager::class.java)?.isUserUnlocked != true) return
+        val pkg = intent.data?.schemeSpecificPart ?: return
+        runAsync {
+            GuardNotifications.cancelReviewUnfinished(context, pkg)
+            if (GuardRepository.hasUnfinishedReview(context, pkg)) {
+                GuardRepository.get(context).clearUnfinishedReview(pkg)
+            }
+        }
+    }
+}
+
+/**
  * Explicit broadcasts from IchthysGuardService (sender must hold NETWORK_STACK): after its
  * install-time scan finished, so the notification carries the real tracker count even when the
- * Settings process wasn't running; and [GuardNotifications.ACTION_ALERT] behaviour alerts.
+ * Settings process wasn't running; [GuardNotifications.ACTION_ALERT] behaviour alerts; and
+ * IchthysOS: [GuardNotifications.ACTION_WOKE] when an asleep app was opened.
  */
 class AppScannedReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
@@ -66,6 +89,15 @@ class AppScannedReceiver : BroadcastReceiver() {
                     ?: return
             val detail = intent.getStringExtra(GuardNotifications.EXTRA_DETAIL) ?: type.summary
             runAsync { GuardNotifications.notifyAlert(context, pkg, type, detail) }
+            return
+        }
+        // IchthysOS: an asleep app was opened; the service already gave it its network back.
+        if (intent.action == GuardNotifications.ACTION_WOKE) {
+            val pkgs = intent.getStringArrayExtra(GuardNotifications.EXTRA_PACKAGES) ?: return
+            runAsync {
+                val repo = GuardRepository.get(context)
+                for (pkg in pkgs) repo.wakeOpened(pkg)
+            }
             return
         }
         if (intent.action != GuardNotifications.ACTION_APP_SCANNED) return

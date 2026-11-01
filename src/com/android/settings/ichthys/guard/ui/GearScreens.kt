@@ -416,9 +416,9 @@ private fun NewAppsPage(vm: GuardViewModel, nav: GuardNav, modifier: Modifier) {
             GuardCard(title = "Waiting · ${waiting.size}") {
                 if (waiting.isEmpty()) Text("No app is waiting.", color = t.muted)
                 for (a in waiting) {
-                    AppLine(a.packageName, a.label, nav.openApp) {
-                        TextButton(onClick = { scope.launch(Dispatchers.IO) { releaseQuarantine(repo, a.packageName) } }) { Text("Release as is") }
-                    }
+                    // IchthysOS: no "Release as is": a new app opens only with the
+                    // recommendation, a preset or Customize (its page or its first launch).
+                    AppLine(a.packageName, a.label, nav.openApp) {}
                 }
                 Text("Open an app to pick its preset; that releases it too.", style = MaterialTheme.typography.bodySmall, color = t.muted)
             }
@@ -476,7 +476,7 @@ private fun SleepPage(vm: GuardViewModel, nav: GuardNav, modifier: Modifier) {
                 ToggleRow(
                     "Sleep after ${auto.autoTightenDays} days unused",
                     auto.autoTighten,
-                    "An app you haven't used for ${auto.autoTightenDays} days loses its network and is paused; opening it shows Guard's review. Off unless you turn it on.",
+                    "An app you haven't used for ${auto.autoTightenDays} days loses its network; opening it gives it back. Off unless you turn it on.",
                 ) { on -> repo.updateAutomation { it.copy(autoTighten = on) } }
                 val dormant = apps.filter { policies.policyFor(it.packageName).dormant }
                 if (dormant.isNotEmpty()) SectionLabel("Asleep · ${dormant.size}", Modifier.padding(top = 8.dp))

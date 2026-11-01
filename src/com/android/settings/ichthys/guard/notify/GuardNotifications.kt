@@ -36,6 +36,7 @@ import com.android.settings.ichthys.guard.model.AlertType
 import com.android.settings.ichthys.guard.model.HostRules
 import com.android.settings.ichthys.guard.model.PeriodReport
 import com.android.settings.ichthys.guard.model.StatsHistory
+import com.android.settings.ichthys.guard.ui.FirstLaunchActivity
 import com.android.settings.ichthys.guard.ui.GuardActivity
 import java.util.Calendar
 
@@ -72,6 +73,13 @@ object GuardNotifications {
      */
     const val ACTION_ALERT = "org.ichthys.guard.action.ALERT"
     const val EXTRA_ALERT_TYPE = "alert_type"
+    /**
+     * IchthysOS: explicit broadcast from IchthysGuardService (to AppScannedReceiver, like
+     * [ACTION_ALERT]) when an app asleep for being unused came to the top; the service has lifted
+     * its deny already. Extra [EXTRA_PACKAGES]: the packages of the uid.
+     */
+    const val ACTION_WOKE = "org.ichthys.guard.action.WOKE"
+    const val EXTRA_PACKAGES = "packages"
     const val EXTRA_DETAIL = "detail"
     /** Profile schedule alarm (explicit, to NotificationActionReceiver). */
     const val ACTION_PROFILE_TICK = "com.android.settings.ichthys.guard.action.PROFILE_TICK"
@@ -80,6 +88,8 @@ object GuardNotifications {
     private const val REPORT_ID = 0x16a0
     private const val TIGHTEN_ID = 0x16a1
     private const val ALERT_ID_BASE = 0x2000000
+    /** IchthysOS: "<app>: review not finished", one per package. */
+    private const val REVIEW_ID_BASE = 0x3000000
     private const val PREFS = "ichthys_guard_notify"
     private const val KEY_CHANGED_SEQ = "changed_seq"
     /** Settings.Global.BOOT_COUNT [KEY_CHANGED_SEQ] belongs to (the sequence restarts at boot). */
@@ -410,13 +420,58 @@ object GuardNotifications {
             .notify(ALERT_ID_BASE + ((pkg + type.name).hashCode() and 0xFFFFFF), n)
     }
 
+    private fun reviewNotificationId(pkg: String) = REVIEW_ID_BASE + (pkg.hashCode() and 0xFFFFFF)
+
+    /**
+     * IchthysOS: a quarantined app's first-launch review was closed without a choice. Silent (it
+     * only repeats what the user just did); tapping it opens the review again. Cleared by
+     * [cancelReviewUnfinished] when the app is released or removed. Call off the main thread.
+     */
+    fun notifyReviewUnfinished(ctx: Context, pkg: String, label: String) {
+        if (pkg == ctx.packageName || !canNotify(ctx)) return
+        // The same entry point as the suspended-app dialog's Review button. Settings' own uid
+        // passes the activity's SEND_SHOW_SUSPENDED_APP_DETAILS permission.
+        val review =
+            PendingIntent.getActivity(
+                ctx,
+                reviewNotificationId(pkg),
+                Intent(Intent.ACTION_SHOW_SUSPENDED_APP_DETAILS)
+                    .setClass(ctx, FirstLaunchActivity::class.java)
+                    .putExtra(Intent.EXTRA_PACKAGE_NAME, pkg)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+        val text = ctx.getString(R.string.ichthys_guard_review_unfinished_text)
+        val n =
+            Notification.Builder(ctx, CHANNEL_ALERTS)
+                .setSmallIcon(R.drawable.ic_ichthys_guard_notify)
+                .setContentTitle(ctx.getString(R.string.ichthys_guard_review_unfinished_title, label))
+                .setContentText(text)
+                .setStyle(Notification.BigTextStyle().bigText(text))
+                .setContentIntent(review)
+                .setSilent(true)
+                .setOnlyAlertOnce(true)
+                .setAutoCancel(true)
+                .build()
+        ctx.getSystemService(NotificationManager::class.java).notify(reviewNotificationId(pkg), n)
+    }
+
+    /** IchthysOS: removes [notifyReviewUnfinished]'s notification of [pkg], if any. Any thread. */
+    fun cancelReviewUnfinished(ctx: Context, pkg: String) {
+        try {
+            ctx.getSystemService(NotificationManager::class.java).cancel(reviewNotificationId(pkg))
+        } catch (e: RuntimeException) {
+            Log.w(TAG, "could not clear the review notice of $pkg", e)
+        }
+    }
+
     /** After auto-tighten paused apps. */
     fun notifyTightened(ctx: Context, labels: List<String>) {
         if (labels.isEmpty() || !canNotify(ctx)) return
         val days = GuardRepository.get(ctx).automation.value.autoTightenDays
         val text =
             labels.joinToString() +
-                " — unused for $days days, network cut. Opening one shows Guard's review."
+                " — unused for $days days, network cut. Opening one gives it its network back."
         val n =
             Notification.Builder(ctx, CHANNEL_ALERTS)
                 .setSmallIcon(R.drawable.ic_ichthys_guard_notify)

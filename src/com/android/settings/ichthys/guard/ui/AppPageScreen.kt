@@ -79,6 +79,7 @@ fun AppPageScreen(vm: GuardViewModel, nav: GuardNav, packageName: String, modifi
     val rules by repo.rules.collectAsStateWithLifecycle()
     val auto by repo.automation.collectAsStateWithLifecycle()
     val verify by repo.verify.collectAsStateWithLifecycle()
+    val unfinished by repo.unfinishedReviews.collectAsStateWithLifecycle()
     val blockedToday by vm.blockedTodayByApp.collectAsStateWithLifecycle()
     val tick = rememberSettingsTick(ShieldTable.OBSERVED_URIS)
     var version by remember { mutableIntStateOf(0) }
@@ -123,6 +124,7 @@ fun AppPageScreen(vm: GuardViewModel, nav: GuardNav, packageName: String, modifi
             // The effective state now, in the Apps row's words.
             Text(
                 when {
+                    quarantined && packageName in unfinished -> "Quarantined · review not finished"
                     quarantined -> "Quarantined · pick a preset to release"
                     policy.dormant -> "Asleep · unused for weeks, no network"
                     offline != null -> "Blocked now · ${offline.sentence}"
@@ -426,6 +428,8 @@ internal fun releaseQuarantine(repo: com.android.settings.ichthys.guard.data.Gua
         val failed =
             ctx.packageManager.setPackagesSuspended(arrayOf(pkg), false, null, null, null as android.content.pm.SuspendDialogInfo?)
         if (failed.isNullOrEmpty()) {
+            // IchthysOS: released, so an unfinished first-launch review is finished too.
+            repo.clearUnfinishedReview(pkg)
             repo.journal(com.android.settings.ichthys.guard.model.JournalKind.RELEASED, "Released with a preset", pkg)
             ctx.packageManager.getLaunchIntentForPackage(pkg)?.let {
                 ctx.startActivity(it.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))

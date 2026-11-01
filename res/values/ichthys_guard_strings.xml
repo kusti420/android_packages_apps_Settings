@@ -59,8 +59,6 @@
     <!-- First-launch review sheet (FirstLaunchActivity): shown when the user opens a newly
          installed, still quarantined app and taps Review in the system's suspended-app dialog. -->
     <string name="ichthys_guard_first_launch_intro">This app hasn\'t run yet. Choose how Guard treats it before it opens.</string>
-    <!-- IchthysOS: the same sheet for an app Guard paused after weeks unused (auto-tighten). -->
-    <string name="ichthys_guard_first_launch_intro_dormant">Guard paused this app because you hadn\'t used it for a while. Choose how Guard treats it before it opens again.</string>
     <string name="ichthys_guard_first_launch_installer">Installed by <xliff:g id="installer">%1$s</xliff:g></string>
     <string name="ichthys_guard_first_launch_section_trackers">Trackers</string>
     <string name="ichthys_guard_first_launch_section_permissions">Permissions requested</string>
@@ -113,8 +111,14 @@
     <!-- First-launch buttons -->
     <string name="ichthys_guard_first_launch_apply">Apply recommended</string>
     <string name="ichthys_guard_first_launch_customize">Customize</string>
-    <string name="ichthys_guard_first_launch_as_is">Open as-is</string>
     <string name="ichthys_guard_first_launch_failed">Couldn\'t release <xliff:g id="app">%1$s</xliff:g></string>
+    <!-- IchthysOS: top of the first-launch sheet when the user closed this app's review before
+         without a choice (back, a tap outside, leaving it). -->
+    <string name="ichthys_guard_first_launch_unfinished">You left this review unfinished. Pick the recommendation, a preset, or Customize to open it.</string>
+    <!-- IchthysOS: notification after a first-launch review was closed without a choice; tapping
+         it opens the review again. -->
+    <string name="ichthys_guard_review_unfinished_title"><xliff:g id="app">%1$s</xliff:g>: review not finished</string>
+    <string name="ichthys_guard_review_unfinished_text">It stays quarantined until you pick a preset. Tap to finish the review.</string>
 
     <!-- IchthysOS: the Settings hub "Protected" card (ShoalProtectedPreference) when some
          protections are off: names them (comma-separated labels such as "Clipboard lockdown"). -->
