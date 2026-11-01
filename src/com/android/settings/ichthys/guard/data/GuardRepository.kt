@@ -40,13 +40,30 @@ import android.provider.Settings
 import android.util.Log
 import com.android.settings.R
 import com.android.settings.ichthys.guard.backend.BehaviourFlags
+import com.android.settings.ichthys.guard.backend.BlockedCounter
 import com.android.settings.ichthys.guard.backend.GuardBackend
+import com.android.settings.ichthys.guard.backend.Health
 import com.android.settings.ichthys.guard.backend.ServiceBackend
+import com.android.settings.ichthys.guard.backend.UidRule
+import com.android.settings.ichthys.guard.model.AppControls
 import com.android.settings.ichthys.guard.model.AppPolicy
+import com.android.settings.ichthys.guard.model.AppPreset
 import com.android.settings.ichthys.guard.model.AutomationSettings
+import com.android.settings.ichthys.guard.model.BlockReason
 import com.android.settings.ichthys.guard.model.CustomRule
 import com.android.settings.ichthys.guard.model.GuardEvent
 import com.android.settings.ichthys.guard.model.HostPattern
+import com.android.settings.ichthys.guard.model.JournalEntry
+import com.android.settings.ichthys.guard.model.JournalKind
+import com.android.settings.ichthys.guard.model.JournalLog
+import com.android.settings.ichthys.guard.model.LocationMode
+import com.android.settings.ichthys.guard.model.PresetControl
+import com.android.settings.ichthys.guard.model.ScanMode
+import com.android.settings.ichthys.guard.model.ScreenOffMode
+import com.android.settings.ichthys.guard.model.VerifyHistory
+import com.android.settings.ichthys.guard.model.VerifyRun
+import com.android.settings.ichthys.guard.os.ShieldTable
+import com.android.settings.ichthys.protect.IchthysProtect
 import com.android.settings.ichthys.guard.model.LabeledEvent
 import com.android.settings.ichthys.guard.model.LocalNetwork
 import com.android.settings.ichthys.guard.model.NetworkAccess
@@ -108,6 +125,8 @@ class GuardRepository(
     private val bridge: OsSettingsBridge = OsSettingsBridge(context.contentResolver),
     private val statsStore: StatsStore = StatsStore(dataDir),
     private val automationStore: AutomationStore = AutomationStore(dataDir),
+    private val journalStore: JournalStore = JournalStore(dataDir),
+    private val verifyStore: VerifyStore = VerifyStore(dataDir),
 ) {
     // A failing job (a package that can't be read, a store that throws) is logged, not fatal:
     // uncaught, it would take the whole Settings process down.
@@ -149,6 +168,31 @@ class GuardRepository(
     private val _riskFacts = MutableStateFlow<Map<String, RiskFacts>>(emptyMap())
     /** package → what the risk score needs from its code and manifest (user apps). */
     val riskFacts: StateFlow<Map<String, RiskFacts>> = _riskFacts.asStateFlow()
+
+    private val _journal = MutableStateFlow(journalStore.load())
+    /**
+     * IchthysOS: the journal: Guard's state changes and the platform's shield proofs, oldest
+     * first, kept across reboots (the service's ring restarts at boot).
+     */
+    val journal: StateFlow<JournalLog> = _journal.asStateFlow()
+    private var journalSavedMs = 0L
+
+    private val _verify = MutableStateFlow(verifyStore.load())
+    /** IchthysOS: verification runs (IchthysProbe launched by Guard), newest first. */
+    val verify: StateFlow<VerifyHistory> = _verify.asStateFlow()
+
+    private val _blocked = MutableStateFlow<Map<Int, BlockedCounter>>(emptyMap())
+    /** IchthysOS: uid → blocked attempts since boot (service counters). */
+    val blockedCounters: StateFlow<Map<Int, BlockedCounter>> = _blocked.asStateFlow()
+
+    private val _denyNow = MutableStateFlow<Map<Int, BlockReason>>(emptyMap())
+    /** IchthysOS: the uids offline right now, with the reason (the effective firewall state). */
+    val denyNow: StateFlow<Map<Int, BlockReason>> = _denyNow.asStateFlow()
+
+    private val _health = MutableStateFlow(Health.UNREACHABLE)
+    /** IchthysOS: IIchthysGuard.HEALTH_* bits, [Health.UNREACHABLE] without the service. */
+    val health: StateFlow<Int> = _health.asStateFlow()
+    private var countersRefreshedMs = 0L
 
     private var uidToApp: Map<Int, AppInfo> = emptyMap()
     private var lastSeq = 0L
@@ -247,8 +291,24 @@ class GuardRepository(
             } finally {
                 backfilled.countDown()
             }
+            refreshEvidence(force = true)
             backend.liveEvents().collect { ingest(it) }
         }
+    }
+
+    /**
+     * IchthysOS: re-reads the service's health bits, the deny chain and the per-uid blocked
+     * counters (three cheap binder calls). Called on start, when the UI comes back, and after a
+     * batch with blocked events, at most every few seconds.
+     */
+    fun refreshEvidence(force: Boolean = false) {
+        val now = System.currentTimeMillis()
+        if (!force && now - countersRefreshedMs < 3_000) return
+        countersRefreshedMs = now
+        _health.value = backend.getHealth()
+        if (_health.value == Health.UNREACHABLE) return
+        _blocked.value = backend.getBlockedCounters()
+        _denyNow.value = backend.getDenyNow()
     }
 
     fun refreshApps() {
@@ -291,11 +351,58 @@ class GuardRepository(
         val fresh = batch.filter { it.seq > lastSeq }
         if (fresh.isEmpty()) return
         lastSeq = fresh.maxOf { it.seq }
-        val labeled = fresh.map(::label)
+        // IchthysOS: journal entries and shield proofs share the ring but not the traffic
+        // analytics; they go to the journal, which also survives reboots.
+        val (network, evidence) = fresh.partition { it.isNetwork }
+        if (evidence.isNotEmpty()) {
+            val entries = evidence.mapNotNull { JournalEntry.of(label(it)) }
+            _journal.update { it.plus(entries) }
+            val now = System.currentTimeMillis()
+            if (now - journalSavedMs > 10_000) flushJournal(now)
+        }
+        if (network.isEmpty()) return
+        val labeled = network.map(::label)
         _events.update { (it + labeled).takeLast(MAX_EVENTS) }
         _stats.update { it.record(labeled) }
         val now = System.currentTimeMillis()
         if (now - statsSavedMs > 30_000) flushStats(now)
+        if (labeled.any { it.event.blocked }) scope.launch { refreshEvidence() }
+    }
+
+    fun flushJournal(now: Long = System.currentTimeMillis()) {
+        journalSavedMs = now
+        try {
+            journalStore.save(_journal.value)
+        } catch (e: IOException) {
+            Log.w(TAG, "journal not saved", e)
+        }
+    }
+
+    /**
+     * IchthysOS: records a state change Guard itself made. It goes to the service's ring (so the
+     * stream shows it between the connections it explains) and, in case the service is away, to
+     * the local journal right away; the echo from the service is deduplicated by time, uid and
+     * code.
+     */
+    fun journal(kind: JournalKind, detail: String?, pkg: String? = null) {
+        val app = pkg?.let { appFor(it) }
+        val uid = app?.uid ?: 0
+        val now = System.currentTimeMillis()
+        _journal.update {
+            it.plus(listOf(JournalEntry(now, uid, kind.code, detail, pkg, app?.label ?: pkg)))
+        }
+        flushJournal(now)
+        if (backend.isLive) backend.addJournal(uid, kind, detail)
+    }
+
+    /** IchthysOS: records a finished or started verification run. */
+    fun recordVerifyRun(run: VerifyRun) {
+        _verify.update { it.with(run) }
+        try {
+            verifyStore.save(_verify.value)
+        } catch (e: IOException) {
+            Log.w(TAG, "verify history not saved", e)
+        }
     }
 
     fun flushStats(now: Long = System.currentTimeMillis()) {
@@ -360,7 +467,7 @@ class GuardRepository(
             _policies.value = next
             savePolicies(next)
         }
-        appFor(pkg)?.let { backend.setNetworkPolicy(it.uid, effectiveUidAccess(it.uid, pkg)) }
+        appFor(pkg)?.let { backend.setNetworkPolicy(it.uid, effectiveUidRule(it.uid, pkg)) }
         if (
             before.screenOffBlock != after.screenOffBlock ||
                 before.backgroundNetworkOff != after.backgroundNetworkOff ||
@@ -383,32 +490,54 @@ class GuardRepository(
      * What the firewall enforces for [pkg]: lockdown, then auto-tighten (dormant), then the
      * stricter of the app's own policy and every active profile that matches it.
      */
-    fun effectiveAccess(pkg: String): NetworkAccess {
+    fun effectiveAccess(pkg: String): NetworkAccess = effectiveRule(pkg).access
+
+    /**
+     * IchthysOS: [effectiveAccess] with the reason that decided it, which the service stamps on
+     * every blocked event (BLOCKED · lockdown, · schedule, · asleep, · policy).
+     */
+    fun effectiveRule(pkg: String): UidRule {
         val lock = _rules.value.lockdown
-        if (lock.enabled && pkg !in lock.allowlist) return NetworkAccess.DENY
+        if (lock.enabled && pkg !in lock.allowlist)
+            return UidRule(NetworkAccess.DENY, BlockReason.LOCKDOWN)
         val policy = _policies.value.policyFor(pkg)
-        if (policy.dormant) return NetworkAccess.DENY
-        var access = policy.network
+        if (policy.dormant) return UidRule(NetworkAccess.DENY, BlockReason.DORMANT)
+        var rule = UidRule(policy.network, BlockReason.POLICY)
         for (p in _automation.value.activeProfiles()) {
-            if (p.matches(pkg, policy.tags) && p.network.ordinal > access.ordinal)
-                access = p.network
+            if (p.matches(pkg, policy.tags) && p.network.ordinal > rule.access.ordinal)
+                rule = UidRule(p.network, BlockReason.SCHEDULE)
         }
-        return access
+        return rule
     }
 
     /**
-     * IchthysOS: what the firewall should hold for [uid]: the strictest [effectiveAccess] of every
+     * IchthysOS: what the firewall should hold for [uid]: the strictest [effectiveRule] of every
      * package sharing it (as [pushAllNetworkPolicies] does), so changing one package doesn't
      * override a stricter sibling. [pkg] counts even before [apps] lists it.
      */
-    private fun effectiveUidAccess(uid: Int, pkg: String): NetworkAccess {
-        var access = effectiveAccess(pkg)
+    private fun effectiveUidRule(uid: Int, pkg: String): UidRule {
+        var rule = effectiveRule(pkg)
         for (app in _apps.value) {
             if (app.uid != uid || app.packageName == pkg) continue
-            val other = effectiveAccess(app.packageName)
-            if (other.ordinal > access.ordinal) access = other
+            val other = effectiveRule(app.packageName)
+            if (other.access.ordinal > rule.access.ordinal) rule = other
         }
-        return access
+        return rule
+    }
+
+    /**
+     * IchthysOS: why [pkg] is offline right now, or null when it is online: the service's own
+     * deny chain (which also knows the screen-off and background rules), with the saved rule as
+     * the fallback while the service is away.
+     */
+    fun offlineReason(pkg: String): BlockReason? {
+        val app = appFor(pkg) ?: return null
+        _denyNow.value[app.uid]?.let {
+            return it
+        }
+        if (backend.isLive && _denyNow.value.isNotEmpty()) return null
+        val rule = effectiveRule(pkg)
+        return if (rule.access == NetworkAccess.DENY && !isPaused()) rule.reason else null
     }
 
     /** The active profiles that override [pkg] right now. */
@@ -463,28 +592,39 @@ class GuardRepository(
     /** Pushes every app's effective access to the platform (boot, lockdown changes, import). */
     fun pushAllNetworkPolicies() {
         if (_apps.value.isEmpty()) refreshApps()
-        val table = HashMap<Int, NetworkAccess>()
+        val table = HashMap<Int, UidRule>()
         for (app in _apps.value) {
-            val want = effectiveAccess(app.packageName)
-            if (want == NetworkAccess.ALLOW) continue
+            val want = effectiveRule(app.packageName)
+            if (want.access == NetworkAccess.ALLOW) continue
             // Several packages can share a uid; the strictest wins.
             val prev = table[app.uid]
-            if (prev == null || want.ordinal > prev.ordinal) table[app.uid] = want
+            if (prev == null || want.access.ordinal > prev.access.ordinal) table[app.uid] = want
         }
         // IchthysOS: a stored rule also holds for an installed app that left the list (a system
         // app whose launcher icon was hidden, microG for one); the replace would drop it.
         val listed = _apps.value.mapTo(HashSet()) { it.packageName }
         for ((pkg, policy) in _policies.value.policies) {
             if (pkg in listed) continue
-            val want = if (policy.dormant) NetworkAccess.DENY else policy.network
-            if (want == NetworkAccess.ALLOW) continue
+            val want =
+                if (policy.dormant) UidRule(NetworkAccess.DENY, BlockReason.DORMANT)
+                else UidRule(policy.network, BlockReason.POLICY)
+            if (want.access == NetworkAccess.ALLOW) continue
             val app = inspector.app(pkg) ?: continue
             val prev = table[app.uid]
-            if (prev == null || want.ordinal > prev.ordinal) table[app.uid] = want
+            if (prev == null || want.access.ordinal > prev.access.ordinal) table[app.uid] = want
         }
-        // One atomic replace; the platform skips system-critical uids.
-        if (table != backend.getNetworkPolicies()) backend.replaceNetworkPolicies(table)
+        // One atomic replace; the platform skips system-critical uids. IchthysOS: reasons aren't
+        // read back, so the table is compared by access and pushed whenever the set differs.
+        if (table.mapValues { it.value.access } != backend.getNetworkPolicies() ||
+            table.values.any { it.reason != BlockReason.POLICY } != lastPushHadReasons
+        ) {
+            backend.replaceNetworkPolicies(table)
+            lastPushHadReasons = table.values.any { it.reason != BlockReason.POLICY }
+        }
+        scope.launch { refreshEvidence(force = true) }
     }
+
+    private var lastPushHadReasons = false
 
     fun blockHost(pkg: String?, host: String) {
         if (pkg == null) {
@@ -583,6 +723,12 @@ class GuardRepository(
                     )
             )
         )
+        if (lock.enabled != enabled) {
+            journal(
+                if (enabled) JournalKind.LOCKDOWN_ON else JournalKind.LOCKDOWN_OFF,
+                if (enabled) "${allow.size} apps keep their network" else null,
+            )
+        }
         scope.launch { pushAllNetworkPolicies() }
     }
 
@@ -650,6 +796,14 @@ class GuardRepository(
 
     /** A profile window opened or closed (alarm), or profiles changed: re-push everything. */
     fun onScheduleTick() {
+        // IchthysOS: the journal says which schedule started or ended.
+        val active = _automation.value.activeProfiles().map { it.name }.toSet()
+        val before = prefs.getStringSet(KEY_ACTIVE_SCHEDULES, null)
+        if (before != null) {
+            for (name in active - before) journal(JournalKind.SCHEDULE_START, name)
+            for (name in before - active) journal(JournalKind.SCHEDULE_END, name)
+        }
+        prefs.edit().putStringSet(KEY_ACTIVE_SCHEDULES, active).apply()
         pushAllNetworkPolicies()
         pushBehaviours()
         scheduleProfileTick()
@@ -777,6 +931,7 @@ class GuardRepository(
             if (worksUnopened(pkg)) continue
             updatePolicy(pkg) { it.copy(dormant = true) }
             suspendDormant(pkg, app.label, auto.autoTightenDays)
+            journal(JournalKind.SLEEP, "Unused for ${auto.autoTightenDays} days", pkg)
             tightened += app.label
         }
         return tightened
@@ -924,6 +1079,7 @@ class GuardRepository(
 
     /** Undoes auto-tighten: network back to the app's own policy, suspension lifted. */
     fun restoreDormant(pkg: String) {
+        if (_policies.value.policyFor(pkg).dormant) journal(JournalKind.WAKE, null, pkg)
         updatePolicy(pkg) { it.copy(dormant = false) }
         try {
             context.packageManager.setPackagesSuspended(
@@ -985,13 +1141,46 @@ class GuardRepository(
             false
         }
 
-    fun exportJson(): String = _rules.value.copy(policies = _policies.value).toJson()
+    /**
+     * IchthysOS: the whole setup as JSON: rules, lockdown, every app's policy (with its preset),
+     * schedules and the other automation, every per-app shield list and the storage scopes as
+     * raw Settings values, the master switches and the fake place.
+     */
+    fun exportJson(): String {
+        val cr = context.contentResolver
+        val lists = HashMap<String, String>()
+        for (key in ShieldTable.ALL_LIST_KEYS) {
+            Settings.Secure.getString(cr, key)?.let { lists[key] = it }
+        }
+        val masters = HashMap<String, Int>()
+        for (sw in ShieldTable.MASTER_SWITCHES) masters[sw.key] = if (sw.isOn(cr)) 1 else 0
+        val fake = HashMap<String, String>()
+        for (key in
+            listOf(
+                ShieldTable.KEY_SPOOF_ON,
+                ShieldTable.KEY_SPOOF_FAKE,
+                ShieldTable.KEY_SPOOF_FAKE_NAME,
+            )) {
+            Settings.Secure.getString(cr, key)?.let { fake[key] = it }
+        }
+        return _rules.value
+            .copy(
+                policies = _policies.value,
+                automation = _automation.value,
+                shieldLists = lists,
+                masters = masters,
+                fakePlace = fake,
+            )
+            .toJson()
+    }
 
     /** @return number of rules imported. Throws IllegalArgumentException on bad input. */
     fun importJson(text: String): Int {
         val imported = RuleBook.fromJson(text)
         val merged = _rules.value.copy(policies = _policies.value).merge(imported)
-        saveRules(merged)
+        // The stores keep only what they own; the rest is applied to Settings below.
+        saveRules(merged.copy(automation = null, shieldLists = emptyMap(), masters = emptyMap(),
+            fakePlace = emptyMap()))
         synchronized(policyLock) {
             // Imported policies overlay local ones: apply each exception that changed, one
             // package at a time. Nothing else in the shared keys changes.
@@ -1007,8 +1196,220 @@ class GuardRepository(
             _policies.value = merged.policies
             savePolicies(merged.policies)
         }
-        scope.launch { pushAllNetworkPolicies() }
+        // IchthysOS: the rest of the setup. Lists replace the local value key by key (a backup
+        // is a whole setup, not a merge); unknown keys are skipped.
+        val cr = context.contentResolver
+        try {
+            for ((key, value) in imported.shieldLists) {
+                if (key in ShieldTable.ALL_LIST_KEYS) Settings.Secure.putString(cr, key, value)
+            }
+            for ((key, on) in imported.masters) {
+                ShieldTable.MASTER_SWITCHES.firstOrNull { it.key == key }?.setOn(cr, on != 0)
+            }
+            for ((key, value) in imported.fakePlace) {
+                if (
+                    key == ShieldTable.KEY_SPOOF_ON ||
+                        key == ShieldTable.KEY_SPOOF_FAKE ||
+                        key == ShieldTable.KEY_SPOOF_FAKE_NAME
+                )
+                    Settings.Secure.putString(cr, key, value)
+            }
+        } catch (e: SecurityException) {
+            Log.w(TAG, "no WRITE_SECURE_SETTINGS; shield lists not imported", e)
+            _osWritable.value = false
+        }
+        imported.automation?.let { auto -> updateAutomation { auto } }
+        syncOsListsFromSettings()
+        scope.launch {
+            pushAllNetworkPolicies()
+            pushBehaviours()
+        }
+        journal(JournalKind.RULES_APPLIED, "Backup imported")
         return imported.rules.size
+    }
+
+    // ---- IchthysOS: the app page's controls and presets ---------------------------------------
+
+    /** The screen-off control's value: the two old toggles read as one three-way. */
+    fun screenOffMode(pkg: String): ScreenOffMode {
+        val p = _policies.value.policyFor(pkg)
+        return when {
+            p.screenOffBlock -> ScreenOffMode.OFFLINE
+            pkg in _automation.value.screenOffExempt -> ScreenOffMode.STAY_ONLINE
+            else -> ScreenOffMode.FOLLOW
+        }
+    }
+
+    fun setScreenOffMode(pkg: String, mode: ScreenOffMode) {
+        updatePolicy(pkg) { it.copy(screenOffBlock = mode == ScreenOffMode.OFFLINE) }
+        val exempt = mode == ScreenOffMode.STAY_ONLINE
+        if ((pkg in _automation.value.screenOffExempt) != exempt) {
+            updateAutomation {
+                it.copy(
+                    screenOffExempt =
+                        if (exempt) it.screenOffExempt + pkg else it.screenOffExempt - pkg
+                )
+            }
+        }
+    }
+
+    /**
+     * The location control: the two Settings lists read as one three-way. An app on both lists
+     * (possible with the old independent toggles) reads NONE, because that is what the platform
+     * does (LocationProviderManager checks "No location" first).
+     */
+    fun locationMode(pkg: String): LocationMode =
+        when {
+            IchthysProtect.isListed(context, ShieldTable.KEY_LOCATION_NOFIX, pkg) ->
+                LocationMode.NONE
+            IchthysProtect.isListed(context, ShieldTable.KEY_LOCATION_REAL, pkg) -> LocationMode.REAL
+            else -> LocationMode.FAKE
+        }
+
+    /** Writes both lists so they can't contradict each other. */
+    fun setLocationMode(pkg: String, mode: LocationMode) {
+        IchthysProtect.setListed(
+            context,
+            ShieldTable.KEY_LOCATION_NOFIX,
+            pkg,
+            mode == LocationMode.NONE,
+        )
+        IchthysProtect.setListed(
+            context,
+            ShieldTable.KEY_LOCATION_REAL,
+            pkg,
+            mode == LocationMode.REAL,
+        )
+    }
+
+    fun scanMode(pkg: String): ScanMode =
+        if (IchthysProtect.isListed(context, ShieldTable.KEY_SCAN_EMPTY, pkg)) ScanMode.EMPTY
+        else ScanMode.REAL
+
+    fun setScanMode(pkg: String, mode: ScanMode) =
+        IchthysProtect.setListed(context, ShieldTable.KEY_SCAN_EMPTY, pkg, mode == ScanMode.EMPTY)
+
+    /** True when the fake place is on for everyone not on the real list (Gear › Fake place). */
+    fun fakePlaceOn(): Boolean =
+        Settings.Secure.getString(context.contentResolver, ShieldTable.KEY_SPOOF_ON) != "0"
+
+    /** The effective state of every control of [pkg], for the preset comparison. */
+    fun appControls(pkg: String): AppControls {
+        val p = _policies.value.policyFor(pkg)
+        val otherAllowed =
+            ShieldTable.SHIELDS
+                .filter { s ->
+                    s.listedMeansReal &&
+                        s.id != "contacts" &&
+                        s.id != "sensors" &&
+                        s.id != "location_real" &&
+                        !s.isProtected(context, pkg)
+                }
+                .map { it.label }
+        return AppControls(
+            network = p.network,
+            screenOff = screenOffMode(pkg),
+            backgroundOff = p.backgroundNetworkOff,
+            lan = p.localNetwork,
+            location = locationMode(pkg),
+            scans = scanMode(pkg),
+            contactsReal = IchthysProtect.isListed(context, ShieldTable.KEY_CONTACTS, pkg),
+            contactsPicked = ShieldTable.isContactsPicked(context, pkg),
+            sensorsReal = p.sensorsExempt,
+            nfcBlocked = IchthysProtect.isListed(context, ShieldTable.KEY_NFC_BLOCKED, pkg),
+            lockdownKeep = pkg in _rules.value.lockdown.allowlist,
+            otherAllowed = otherAllowed,
+        )
+    }
+
+    /** The controls of [pkg] that differ from its preset; empty for Custom or an exact match. */
+    fun presetDifferences(pkg: String): Set<PresetControl> {
+        val spec = _policies.value.policyFor(pkg).preset.spec ?: return emptySet()
+        return appControls(pkg).differences(spec)
+    }
+
+    /**
+     * IchthysOS: applies [preset] to [pkg] in one go: the whole [AppPolicy] and every Settings
+     * list key the preset decides (network, screen-off, background, local network, location,
+     * scans, contacts, sensors, NFC, lockdown allowlist; every other allow list cleared, so
+     * "everything else shielded" holds). Then one push to the service and one journal entry.
+     * [AppPreset.CUSTOM] only records the choice; nothing else changes.
+     */
+    fun applyPreset(pkg: String, preset: AppPreset) {
+        val spec = preset.spec
+        if (spec == null) {
+            updatePolicy(pkg) { it.copy(preset = AppPreset.CUSTOM) }
+            journal(JournalKind.PRESET, "Custom", pkg)
+            return
+        }
+        synchronized(policyLock) {
+            // Every allow list the preset doesn't grant: off. ":picked" entries too (set below).
+            for (key in ShieldTable.ALLOW_LIST_KEYS) {
+                if (key == ShieldTable.KEY_SENSORS || key == ShieldTable.KEY_CONTACTS) continue
+                if (key == ShieldTable.KEY_LOCATION_REAL) continue
+                IchthysProtect.setListed(context, key, pkg, false)
+            }
+            ShieldTable.setContactsPicked(context, pkg, spec.contactsPicked)
+            setLocationMode(pkg, spec.location)
+            setScanMode(pkg, spec.scans)
+            IchthysProtect.setListed(context, ShieldTable.KEY_NFC_BLOCKED, pkg, spec.nfcBlocked)
+        }
+        // The policy (mirrors contacts, clipboard and sensors into their lists itself).
+        val wasDormant = _policies.value.policyFor(pkg).dormant
+        updatePolicy(pkg) {
+            it.copy(
+                network = spec.network,
+                contactsAllowed = false,
+                clipboardAllowed = false,
+                sensorsExempt = spec.sensorsReal,
+                screenOffBlock = spec.screenOff == ScreenOffMode.OFFLINE,
+                backgroundNetworkOff = spec.backgroundOff,
+                localNetwork = spec.lan,
+                dormant = false,
+                preset = preset,
+            )
+        }
+        if (wasDormant) restoreDormant(pkg)
+        val exempt = spec.screenOff == ScreenOffMode.STAY_ONLINE
+        if ((pkg in _automation.value.screenOffExempt) != exempt) {
+            updateAutomation {
+                it.copy(
+                    screenOffExempt =
+                        if (exempt) it.screenOffExempt + pkg else it.screenOffExempt - pkg
+                )
+            }
+        }
+        if ((pkg in _rules.value.lockdown.allowlist) != spec.lockdownKeep)
+            setLockdownAllowed(pkg, spec.lockdownKeep)
+        syncOsListsFromSettings()
+        journal(JournalKind.PRESET, preset.label, pkg)
+    }
+
+    /** Apps held in Guard's first-launch quarantine (suspended by Settings, not yet released). */
+    fun quarantinedApps(): List<AppInfo> {
+        val pm = context.packageManager
+        return _apps.value.filter { a ->
+            !a.isSystem &&
+                runCatching { pm.isPackageQuarantined(a.packageName) }.getOrDefault(false) &&
+                !_policies.value.policyFor(a.packageName).dormant
+        }
+    }
+
+    /**
+     * IchthysOS: the context the Settings lists are read with (the UI's helpers share it so the
+     * list reads happen against the same user as the writes).
+     */
+    fun contextForLists(): Context = context
+
+    /** Apps on the real-location list (the fake place doesn't apply to them). */
+    fun realLocationApps(): Set<String> =
+        IchthysProtect.readPackages(context, ShieldTable.KEY_LOCATION_REAL).filter { ':' !in it }.toSet()
+
+    /** The master shields (home card): how many of the rows are fully on. */
+    fun masterShieldsOn(): Pair<Int, Int> {
+        val cr = context.contentResolver
+        val rows = ShieldTable.MASTER_ROWS
+        return rows.count { r -> r.switches.all { it.isOn(cr) } } to rows.size
     }
 
     /**
@@ -1072,6 +1473,10 @@ class GuardRepository(
         private const val KEY_PAUSED_UNTIL = "paused_until"
         private const val KEY_SENSORS_MIGRATED = "sensor_exemptions_migrated"
         private const val KEY_LOCKDOWN_SEEDED = "lockdown_allowlist_seeded"
+        /** IchthysOS: the schedules active at the last tick, for the journal's start/end lines. */
+        private const val KEY_ACTIVE_SCHEDULES = "active_schedules"
+        /** The tester app Guard launches for a verification run; user-installed only. */
+        const val PROBE_PACKAGE = "org.ichthys.probe"
         private const val DATA_DIR = "ichthys_guard"
         private const val PREFS_NAME = "ichthys_guard"
         private val DEFAULT_LOCKDOWN_HINTS =

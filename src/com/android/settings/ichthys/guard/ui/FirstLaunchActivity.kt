@@ -36,6 +36,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -86,6 +87,8 @@ import com.android.settings.ichthys.guard.model.HostRules
 import com.android.settings.ichthys.guard.model.PermissionGroup
 import com.android.settings.ichthys.guard.model.Recommendation
 import com.android.settings.ichthys.guard.model.TrackerBlockLevel
+import com.android.settings.ichthys.guard.model.AppPreset
+import com.android.settings.ichthys.guard.model.JournalKind
 import com.android.settings.ichthys.guard.ui.theme.Guard
 import com.android.settings.ichthys.guard.ui.theme.GuardTheme
 import kotlinx.coroutines.Dispatchers
@@ -127,18 +130,22 @@ class FirstLaunchActivity : ComponentActivity() {
                 FirstLaunchSheet(
                     pkg,
                     onDismiss = { finish() },
-                    onChoice = { sheet, choice -> release(sheet, choice) },
+                    onChoice = { sheet, choice, preset -> release(sheet, choice, preset) },
                 )
             }
         }
     }
 
     /** Writes the policy for [choice], lifts the quarantine and starts the app. Main thread. */
-    private suspend fun release(sheet: SheetData, choice: SheetChoice) {
+    private suspend fun release(sheet: SheetData, choice: SheetChoice, preset: AppPreset?) {
         val pkg = sheet.facts.packageName
         val (released, launch) =
             withContext(Dispatchers.IO) {
-                if (choice == SheetChoice.APPLY) {
+                if (choice == SheetChoice.APPLY && preset != null && preset != AppPreset.CUSTOM) {
+                    // IchthysOS: a preset picked on the sheet: the whole policy and every shield
+                    // list in one go, the same as on the app's page.
+                    sheet.repo.applyPreset(pkg, preset)
+                } else if (choice == SheetChoice.APPLY) {
                     // The same path the app page uses: store, OS allowlists and the service. A
                     // new app has no policy yet, so the recommendation becomes it. IchthysOS: any
                     // app with choices already (paused by auto-tighten, or blocked from the
@@ -155,6 +162,16 @@ class FirstLaunchActivity : ComponentActivity() {
                     sheet.repo.updatePolicy(pkg) { it.copy(dormant = false) }
                 }
                 if (!unsuspend(pkg)) return@withContext false to null
+                sheet.repo.journal(
+                    JournalKind.RELEASED,
+                    when {
+                        preset != null && preset != AppPreset.CUSTOM -> "Released with the ${preset.label} preset"
+                        choice == SheetChoice.APPLY -> "Released with the recommendation"
+                        choice == SheetChoice.CUSTOMIZE -> "Released to set up by hand"
+                        else -> "Released as is"
+                    },
+                    pkg,
+                )
                 true to packageManager.getLaunchIntentForPackage(pkg)
             }
         if (!released) {
@@ -300,7 +317,7 @@ private fun Drawable.toImageBitmap(px: Int): ImageBitmap {
 private fun FirstLaunchSheet(
     pkg: String,
     onDismiss: () -> Unit,
-    onChoice: suspend (SheetData, SheetChoice) -> Unit,
+    onChoice: suspend (SheetData, SheetChoice, AppPreset?) -> Unit,
 ) {
     val t = Guard.tokens
     val ctx = LocalContext.current
@@ -310,6 +327,8 @@ private fun FirstLaunchSheet(
             if (value == null) onDismiss() // uninstalled meanwhile
         }
     var busy by remember { mutableStateOf(false) }
+    // IchthysOS: the preset the main button applies; starts at the recommendation's.
+    var preset by remember { mutableStateOf<AppPreset?>(null) }
     val scope = rememberCoroutineScope()
     val noRipple = remember { MutableInteractionSource() }
 
@@ -347,15 +366,21 @@ private fun FirstLaunchSheet(
                     } else {
                         TrackersCard(s.facts.trackers)
                         PermissionsCard(s.facts.usesInternet, s.groups)
-                        RecommendationCard(s.recommendation)
+                        val chosen = preset ?: s.recommendation.preset
+                        PresetCard(chosen) { preset = it }
+                        if (chosen == AppPreset.CUSTOM) RecommendationCard(s.recommendation)
                     }
                 }
                 Buttons(
                     enabled = sheet != null && !busy,
+                    applyLabel =
+                        (preset ?: sheet?.recommendation?.preset)
+                            ?.takeIf { it != AppPreset.CUSTOM }
+                            ?.let { "Open with the ${it.label} preset" },
                     onChoice = { choice ->
                         val s = sheet ?: return@Buttons
                         busy = true
-                        scope.launch { onChoice(s, choice) }
+                        scope.launch { onChoice(s, choice, preset ?: s.recommendation.preset) }
                     },
                 )
             }
@@ -490,8 +515,20 @@ private fun RecommendationCard(rec: Recommendation) {
     }
 }
 
+/** IchthysOS: the preset picker of the sheet ("Quarantined · pick a preset to release"). */
 @Composable
-private fun Buttons(enabled: Boolean, onChoice: (SheetChoice) -> Unit) {
+private fun PresetCard(chosen: AppPreset, onPick: (AppPreset) -> Unit) {
+    val t = Guard.tokens
+    GuardCard(title = "Preset") {
+        Row(Modifier.horizontalScroll(rememberScrollState())) {
+            for (p in AppPreset.PICKER) Chip(p.label, chosen == p) { onPick(p) }
+        }
+        Text(chosen.summary, style = MaterialTheme.typography.bodySmall, color = t.muted, modifier = Modifier.padding(top = 6.dp))
+    }
+}
+
+@Composable
+private fun Buttons(enabled: Boolean, applyLabel: String?, onChoice: (SheetChoice) -> Unit) {
     val t = Guard.tokens
     Column(Modifier.padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         // The sheet's one accented element: the default action.
@@ -502,7 +539,7 @@ private fun Buttons(enabled: Boolean, onChoice: (SheetChoice) -> Unit) {
             colors =
                 ButtonDefaults.buttonColors(containerColor = t.accent, contentColor = t.onAccent),
         ) {
-            Text(stringResource(R.string.ichthys_guard_first_launch_apply))
+            Text(applyLabel ?: stringResource(R.string.ichthys_guard_first_launch_apply))
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(

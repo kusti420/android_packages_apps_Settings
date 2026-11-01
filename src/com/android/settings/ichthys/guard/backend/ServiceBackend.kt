@@ -24,8 +24,10 @@ import android.util.Log
 import com.android.internal.ichthys.guard.GuardEvent as GuardEventParcel
 import com.android.internal.ichthys.guard.IGuardEventListener
 import com.android.internal.ichthys.guard.IIchthysGuard
+import com.android.settings.ichthys.guard.model.BlockReason
 import com.android.settings.ichthys.guard.model.EventType
 import com.android.settings.ichthys.guard.model.GuardEvent
+import com.android.settings.ichthys.guard.model.JournalKind
 import com.android.settings.ichthys.guard.model.NetworkAccess
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
@@ -72,12 +74,12 @@ class ServiceBackend : GuardBackend {
     override val isLive: Boolean
         get() = service() != null
 
-    override fun setNetworkPolicy(uid: Int, access: NetworkAccess) =
-        write { it.setNetworkPolicy(uid, access.toWire()) }
+    override fun setNetworkPolicy(uid: Int, rule: UidRule) =
+        write { it.setNetworkPolicy(uid, rule.toWire()) }
 
-    override fun replaceNetworkPolicies(policies: Map<Int, NetworkAccess>) =
+    override fun replaceNetworkPolicies(policies: Map<Int, UidRule>) =
         write {
-            val list = policies.filterValues { v -> v != NetworkAccess.ALLOW }.entries.toList()
+            val list = policies.filterValues { v -> v.access != NetworkAccess.ALLOW }.entries.toList()
             it.replaceNetworkPolicies(
                 IntArray(list.size) { i -> list[i].key },
                 IntArray(list.size) { i -> list[i].value.toWire() },
@@ -136,6 +138,33 @@ class ServiceBackend : GuardBackend {
 
     override fun setAlertMask(mask: Int) = write { it.setAlertMask(mask) }
 
+    override fun addJournal(uid: Int, kind: JournalKind, detail: String?) =
+        write { it.addJournal(uid, kind.code, detail) }
+
+    override fun getBlockedCounters(): Map<Int, BlockedCounter> =
+        call(emptyMap()) {
+            val flat = it.blockedCounters ?: LongArray(0)
+            buildMap {
+                for (i in 0 until flat.size / 3) put(
+                    flat[3 * i].toInt(),
+                    BlockedCounter(flat[3 * i + 1].toInt(), flat[3 * i + 2]),
+                )
+            }
+        }
+
+    override fun getHealth(): Int = call(Health.UNREACHABLE) { it.health }
+
+    override fun getDenyNow(): Map<Int, BlockReason> =
+        call(emptyMap()) {
+            val flat = it.denyNow ?: IntArray(0)
+            buildMap {
+                for (i in 0 until flat.size / 2) put(
+                    flat[2 * i],
+                    BlockReason.fromCode(flat[2 * i + 1]),
+                )
+            }
+        }
+
     /** A call that changes the service's device-wide state: system user only (see above). */
     private inline fun write(block: (IIchthysGuard) -> Unit) {
         if (UserHandle.myUserId() != UserHandle.USER_SYSTEM) {
@@ -171,8 +200,24 @@ class ServiceBackend : GuardBackend {
 }
 
 internal fun GuardEventParcel.toModel(): GuardEvent {
-    val kind = if (type == GuardEventParcel.TYPE_CONNECT) EventType.CONNECT else EventType.DNS
+    val kind =
+        when (type) {
+            GuardEventParcel.TYPE_CONNECT -> EventType.CONNECT
+            GuardEventParcel.TYPE_JOURNAL -> EventType.JOURNAL
+            GuardEventParcel.TYPE_SHIELD -> EventType.SHIELD
+            else -> EventType.DNS
+        }
     val answers = ips.orEmpty().filterNotNull()
+    // IchthysOS: the firewall's deny chain (with its reason), or the system hosts file's sinkhole
+    // answer, which has a reason of its own.
+    val sinkholed = GuardEvent.isSinkholed(kind, answers, ip)
+    val code =
+        when {
+            kind != EventType.DNS && kind != EventType.CONNECT -> code
+            blocked -> if (code == 0) BlockReason.POLICY.code else code
+            sinkholed -> BlockReason.BLOCKLIST.code
+            else -> 0
+        }
     return GuardEvent(
         seq = seq,
         timeMs = timeMs,
@@ -182,8 +227,9 @@ internal fun GuardEventParcel.toModel(): GuardEvent {
         ips = answers,
         ip = ip,
         port = port,
-        // IchthysOS: the firewall's deny chain, or the system hosts file's sinkhole answer.
-        blocked = blocked || GuardEvent.isSinkholed(kind, answers, ip),
+        blocked = blocked || sinkholed,
         returnCode = returnCode,
+        code = code,
+        detail = detail,
     )
 }

@@ -24,8 +24,13 @@
          a profile opens it. -->
     <string name="ichthys_guard_owner_only">Guard is managed by the phone\'s owner</string>
 
+    <!-- IchthysOS: Shared values (home city, trips, units, the fake place), its own page under
+         Settings › IchthysOS since the Guard redesign (SharedValuesActivity). -->
+    <string name="ichthys_shared_values_title">Shared values</string>
+    <string name="ichthys_shared_values_summary">Home city, trips, units and the fake place, used by weather, sun times and Guard</string>
+
     <!-- The Guard row on the stock App info page: opens that app's Guard page. -->
-    <string name="ichthys_guard_app_info_summary">Network, trackers and data access</string>
+    <string name="ichthys_guard_app_info_summary">Preset, network, location and data shields</string>
 
     <!-- Per-app shields that are shown both in Guard's Data access card and on a stock page (the
          Usage access page, the No location page). Both read these, so the wording can't drift.

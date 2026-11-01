@@ -16,9 +16,17 @@
 
 package com.android.settings.ichthys.guard.backend
 
+import com.android.settings.ichthys.guard.model.BlockReason
 import com.android.settings.ichthys.guard.model.GuardEvent
+import com.android.settings.ichthys.guard.model.JournalKind
 import com.android.settings.ichthys.guard.model.NetworkAccess
 import kotlinx.coroutines.flow.Flow
+
+/** IchthysOS: a uid's firewall rule with the reason Settings chose it (stamped on blocked events). */
+data class UidRule(val access: NetworkAccess, val reason: BlockReason = BlockReason.POLICY)
+
+/** IchthysOS: blocked network attempts of one uid since boot, and when the last one was. */
+data class BlockedCounter(val count: Int, val lastMs: Long)
 
 /**
  * Everything Guard needs from the platform service `ichthys_guard`
@@ -30,13 +38,13 @@ interface GuardBackend {
     /** True when this talks to the real platform service. */
     val isLive: Boolean
 
-    fun setNetworkPolicy(uid: Int, access: NetworkAccess)
+    fun setNetworkPolicy(uid: Int, rule: UidRule)
 
     /**
      * Replaces the whole table: listed uids get their access, all others go back to ALLOW. The
      * platform skips system-critical uids.
      */
-    fun replaceNetworkPolicies(policies: Map<Int, NetworkAccess>)
+    fun replaceNetworkPolicies(policies: Map<Int, UidRule>)
 
     /** uid → access; uids missing from the map are ALLOW. */
     fun getNetworkPolicies(): Map<Int, NetworkAccess>
@@ -73,6 +81,20 @@ interface GuardBackend {
 
     /** Which [com.android.settings.ichthys.guard.model.AlertType] bits the service reports. */
     fun setAlertMask(mask: Int)
+
+    // ---- IchthysOS: evidence ----------------------------------------------------------------
+
+    /** Appends a journal entry to the service's ring (it comes back through [liveEvents]). */
+    fun addJournal(uid: Int, kind: JournalKind, detail: String?)
+
+    /** Blocked attempts per uid since boot. */
+    fun getBlockedCounters(): Map<Int, BlockedCounter>
+
+    /** IIchthysGuard.HEALTH_* bits, or -1 when the service is unreachable. */
+    fun getHealth(): Int
+
+    /** Uids on the deny chain right now with the reason. */
+    fun getDenyNow(): Map<Int, BlockReason>
 }
 
 /** IIchthysGuard.BEHAVIOUR_* values (kept here so the model needs no framework classes). */
@@ -83,6 +105,30 @@ object BehaviourFlags {
     const val LAN_ALLOW = 8
 }
 
+/** IIchthysGuard.HEALTH_* values. */
+object Health {
+    const val MONITOR = 1
+    const val FIREWALL = 2
+    const val METERED = 4
+    const val TRACKER_DB = 8
+    const val POLICY_LOADED = 16
+    const val ALL = 31
+    /** [GuardBackend.getHealth] while the service is unreachable. */
+    const val UNREACHABLE = -1
+
+    /** The problems [bits] names, in the words of the home card; empty when all is well. */
+    fun problems(bits: Int): List<String> =
+        if (bits == UNREACHABLE) listOf("The Guard service isn't reachable")
+        else
+            buildList {
+                if (bits and FIREWALL == 0) add("The firewall rules didn't reach the network stack")
+                if (bits and MONITOR == 0) add("The traffic monitor isn't registered: no live activity")
+                if (bits and METERED == 0) add("The Wi-Fi-only rules didn't reach the network policy")
+                if (bits and POLICY_LOADED == 0) add("The saved rules couldn't be read at boot")
+                if (bits and TRACKER_DB == 0) add("The tracker database isn't loaded yet")
+            }
+}
+
 internal fun NetworkAccess.toWire(): Int =
     when (this) {
         NetworkAccess.ALLOW -> 0
@@ -90,8 +136,11 @@ internal fun NetworkAccess.toWire(): Int =
         NetworkAccess.DENY -> 2
     }
 
+/** IchthysOS: access in the low byte, the reason above it (IIchthysGuard.ACCESS_REASON_SHIFT). */
+internal fun UidRule.toWire(): Int = access.toWire() or (reason.code shl 8)
+
 internal fun networkAccessFromWire(v: Int): NetworkAccess =
-    when (v) {
+    when (v and 0xff) {
         1 -> NetworkAccess.UNMETERED_ONLY
         2 -> NetworkAccess.DENY
         else -> NetworkAccess.ALLOW

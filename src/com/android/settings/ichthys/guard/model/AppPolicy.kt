@@ -84,6 +84,12 @@ data class AppPolicy(
     val dormant: Boolean = false,
     /** Never auto-tighten this app. */
     val keepActive: Boolean = false,
+    /**
+     * IchthysOS: the preset the user picked on the app's page ([AppPreset.CUSTOM] when none).
+     * A preset writes this policy and every shield list in one go (GuardRepository.applyPreset);
+     * controls that later differ from it show a "differs from preset" mark.
+     */
+    val preset: AppPreset = AppPreset.CUSTOM,
 ) {
     /** True when nothing differs from the Shielded defaults (lets the store drop the entry). */
     val isDefault: Boolean

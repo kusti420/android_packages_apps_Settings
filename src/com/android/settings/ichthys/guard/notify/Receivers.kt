@@ -21,6 +21,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.UserManager
 import com.android.settings.ichthys.guard.data.GuardRepository
+import com.android.settings.ichthys.guard.data.VerifyRunner
 import com.android.settings.ichthys.guard.model.AlertType
 import com.android.settings.ichthys.guard.model.HostRules
 import com.android.settings.ichthys.guard.model.NetworkAccess
@@ -96,6 +97,12 @@ class NotificationActionReceiver : BroadcastReceiver() {
                 }
                 return
             }
+            // IchthysOS: a verification phase got no answer from the probe.
+            VerifyRunner.ACTION_TIMEOUT -> {
+                val token = intent.getStringExtra(VerifyRunner.EXTRA_REPLY_TOKEN)
+                runAsync { VerifyRunner.get(context).onTimeout(token) }
+                return
+            }
         }
         val pkg = intent.getStringExtra(GuardNotifications.EXTRA_PACKAGE) ?: return
         runAsync {
@@ -123,6 +130,21 @@ class NotificationActionReceiver : BroadcastReceiver() {
                 }
             }
         }
+    }
+}
+
+/**
+ * IchthysOS: IchthysProbe's answer to a verification phase Guard launched (VerifyRunner). The
+ * probe is an ordinary user app, so the receiver is exported without a permission; the reply is
+ * accepted only when it carries the one-time token Guard handed the probe for this phase, so
+ * nothing else can forge a verdict.
+ */
+class VerifyResultReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action != VerifyRunner.ACTION_RESULT || !GuardRepository.isGuardUser()) return
+        val token = intent.getStringExtra(VerifyRunner.EXTRA_REPLY_TOKEN) ?: return
+        val extras = intent.extras ?: return
+        runAsync { VerifyRunner.get(context).onResult(token, extras) }
     }
 }
 

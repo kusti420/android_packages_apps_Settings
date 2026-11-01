@@ -260,7 +260,10 @@ data class ActivityFilter(
     val packageName: String? = null,
     val trackersOnly: Boolean = false,
     val blockedOnly: Boolean = false,
-    val types: Set<EventType> = EventType.entries.toSet(),
+    /** IchthysOS: the stream holds network events only; journal and shield entries have their own view. */
+    val types: Set<EventType> = NETWORK_TYPES,
+    /** IchthysOS: only blocks for these reasons (empty = every reason). */
+    val reasons: Set<BlockReason> = emptySet(),
 ) {
     val isActive: Boolean
         get() =
@@ -268,12 +271,14 @@ data class ActivityFilter(
                 packageName != null ||
                 trackersOnly ||
                 blockedOnly ||
-                types.size != EventType.entries.size
+                reasons.isNotEmpty() ||
+                types != NETWORK_TYPES
 
     fun accepts(e: LabeledEvent): Boolean {
         if (packageName != null && e.packageName != packageName) return false
         if (trackersOnly && !e.isTracker) return false
         if (blockedOnly && !e.event.blocked) return false
+        if (reasons.isNotEmpty() && e.event.reason !in reasons) return false
         if (e.event.type !in types) return false
         if (query.isNotBlank()) {
             val q = query.trim().lowercase()
@@ -286,6 +291,10 @@ data class ActivityFilter(
     }
 
     fun apply(events: List<LabeledEvent>): List<LabeledEvent> = events.filter(::accepts)
+
+    companion object {
+        val NETWORK_TYPES: Set<EventType> = setOf(EventType.DNS, EventType.CONNECT)
+    }
 }
 
 /** Apps screen filters. */

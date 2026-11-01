@@ -27,6 +27,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -45,6 +46,7 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -62,6 +64,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.android.settings.ichthys.guard.model.BlockReason
 import com.android.settings.ichthys.guard.model.LabeledEvent
 import com.android.settings.ichthys.guard.ui.theme.Guard
 import java.text.DateFormat
@@ -290,7 +293,13 @@ fun EventRow(e: LabeledEvent, showApp: Boolean, modifier: Modifier = Modifier) {
         }
         Row(Modifier.padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
             Tag(e.event.type.name)
-            if (e.event.blocked) Tag("BLOCKED", danger = true)
+            // IchthysOS: the reason rides on the verdict: "BLOCKED · lockdown".
+            if (e.event.blocked)
+                VerdictTag(
+                    "BLOCKED",
+                    e.event.reason.takeIf { it != BlockReason.NONE }?.label,
+                    danger = true,
+                )
             if (e.tracker != null) Tag(e.tracker, emphasized = true)
             if (e.event.port != 0) Tag(":${e.event.port}")
             if (showApp) {
@@ -377,3 +386,110 @@ private fun Drawable.toIconBitmap(px: Int): ImageBitmap {
     return bmp.asImageBitmap()
 }
 
+
+// ---- IchthysOS: shared pieces of the redesigned pages -------------------------------------------
+
+/**
+ * A row that opens a page: title, a one-line value or summary, and a chevron. The whole gear page
+ * and the app page's sheets are made of these.
+ */
+@Composable
+fun NavRow(
+    title: String,
+    summary: String?,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    trailing: String? = null,
+    danger: Boolean = false,
+) {
+    val t = Guard.tokens
+    Row(
+        modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                title,
+                style = MaterialTheme.typography.bodyLarge,
+                color = if (danger) t.danger else t.text,
+            )
+            if (summary != null)
+                Text(summary, style = MaterialTheme.typography.bodySmall, color = t.muted)
+        }
+        if (trailing != null)
+            Text(
+                trailing,
+                style = MaterialTheme.typography.labelMedium.copy(fontFamily = t.mono),
+                color = t.muted,
+                modifier = Modifier.padding(end = 8.dp),
+            )
+        Text("›", color = t.muted, style = MaterialTheme.typography.titleMedium)
+    }
+}
+
+/**
+ * The reason tag of a stream row: "BLOCKED · lockdown", "ALLOWED", "SHIELDED · contacts".
+ * [reason] is the sentence after the verdict; null for a plain verdict.
+ */
+@Composable
+fun VerdictTag(verdict: String, reason: String?, danger: Boolean = false, emphasized: Boolean = false) {
+    Tag(if (reason.isNullOrEmpty()) verdict else "$verdict · $reason", emphasized = emphasized, danger = danger)
+}
+
+/** The small dot that marks a control changed away from its preset. */
+@Composable
+fun PresetDot(shown: Boolean) {
+    if (!shown) return
+    val t = Guard.tokens
+    Box(
+        Modifier.padding(start = 6.dp)
+            .size(8.dp)
+            .background(t.accent, androidx.compose.foundation.shape.CircleShape)
+    )
+}
+
+/** A label with an optional [PresetDot], above a control. */
+@Composable
+fun ControlLabel(text: String, differs: Boolean, modifier: Modifier = Modifier) {
+    Row(modifier, verticalAlignment = Alignment.CenterVertically) {
+        SectionLabel(text, Modifier.padding(bottom = 0.dp))
+        PresetDot(differs)
+    }
+}
+
+/** A line of a card: a label on the left, a mono value on the right. */
+@Composable
+fun KeyValue(label: String, value: String, danger: Boolean = false) {
+    val t = Guard.tokens
+    Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+        Text(
+            value,
+            style = MaterialTheme.typography.labelMedium.copy(fontFamily = t.mono),
+            color = if (danger) t.danger else t.muted,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/** A page header: a back button and a title, then the content below (the pushed pages). */
+@Composable
+fun PageHeader(title: String, onBack: () -> Unit, subtitle: String? = null) {
+    val t = Guard.tokens
+    TextButton(onClick = onBack) { Text("‹ Back") }
+    Text(title, style = MaterialTheme.typography.headlineMedium)
+    if (subtitle != null)
+        Text(subtitle, style = MaterialTheme.typography.bodySmall, color = t.muted)
+}
+
+/** "09:12" today, "Mon 09:12" within the week, else a short date. */
+fun formatWhen(ms: Long, now: Long = System.currentTimeMillis()): String {
+    val d = now - ms
+    return when {
+        d < 0 || d >= 6 * 86_400_000L -> formatDateTime(ms)
+        d >= 86_400_000L ->
+            java.text.SimpleDateFormat("EEE HH:mm", java.util.Locale.getDefault()).format(Date(ms))
+        else -> java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(Date(ms))
+    }
+}

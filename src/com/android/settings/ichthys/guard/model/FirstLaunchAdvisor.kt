@@ -125,8 +125,16 @@ enum class AdviceReason {
 
 data class AdviceLine(val topic: AdviceTopic, val reason: AdviceReason)
 
-/** The recommended policy plus one reason line per topic, in display order. */
-data class Recommendation(val policy: AppPolicy, val lines: List<AdviceLine>) {
+/**
+ * The recommended policy plus one reason line per topic, in display order. IchthysOS: [preset]
+ * is the preset the sheet's main button applies (Browser for a browser, Untrusted for an app
+ * without INTERNET, else none: the recommendation policy, "Custom").
+ */
+data class Recommendation(
+    val policy: AppPolicy,
+    val lines: List<AdviceLine>,
+    val preset: AppPreset = AppPreset.CUSTOM,
+) {
     /**
      * The recommendation applied on top of a policy the user already built (an app paused by
      * auto-tighten, back for review): network and tracker blocking become at least as strict as
@@ -172,6 +180,13 @@ object FirstLaunchAdvisor {
         val networkReason =
             if (facts.usesInternet) AdviceReason.NETWORK_SHIELDED
             else AdviceReason.NETWORK_NOT_REQUESTED
+        // IchthysOS: the preset the sheet offers first; the user can pick any other there.
+        val preset =
+            when {
+                facts.isBrowser -> AppPreset.BROWSER
+                !facts.usesInternet -> AppPreset.UNTRUSTED
+                else -> AppPreset.CUSTOM
+            }
         return Recommendation(
             base.copy(trackerBlock = trackerBlock),
             listOf(
@@ -179,6 +194,7 @@ object FirstLaunchAdvisor {
                 AdviceLine(AdviceTopic.TRACKERS, trackerReason),
                 AdviceLine(AdviceTopic.EXCEPTIONS, AdviceReason.EXCEPTIONS_CLOSED),
             ),
+            preset,
         )
     }
 }

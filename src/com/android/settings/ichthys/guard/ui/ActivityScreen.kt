@@ -67,6 +67,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.android.settings.ichthys.guard.data.GuardRepository
 import com.android.settings.ichthys.guard.model.ActivityFilter
 import com.android.settings.ichthys.guard.model.EventRun
+import com.android.settings.ichthys.guard.model.BlockReason
 import com.android.settings.ichthys.guard.model.EventType
 import com.android.settings.ichthys.guard.model.GuardEvent
 import com.android.settings.ichthys.guard.model.Grouping
@@ -172,10 +173,13 @@ private fun group(events: List<LabeledEvent>, grouping: Grouping): List<EventGro
                 .sortedByDescending { it.events.size }
     }
 
-/** The sections of the Activity tab: the live log and the totals over a period. */
+/**
+ * The segments of the Activity tab. IchthysOS: Stream (every connection with its reason), Journal
+ * (Guard's own state changes and the shield proofs), Hosts (destinations and bytes) and Trackers.
+ */
 enum class ActivitySection(val label: String) {
-    LIVE("Live"),
-    DATA("Data"),
+    STREAM("Stream"),
+    JOURNAL("Journal"),
     HOSTS("Hosts"),
     TRACKERS("Trackers"),
 }
@@ -186,13 +190,10 @@ enum class ActivitySection(val label: String) {
  * app) are the totals over a period (see [TrafficSection]).
  */
 @Composable
-fun ActivityScreen(
-    vm: GuardViewModel,
-    onOpenApp: (String) -> Unit,
-    onOpenHost: (String) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    var section by rememberSaveable { mutableStateOf(ActivitySection.LIVE) }
+fun ActivityScreen(vm: GuardViewModel, nav: GuardNav, modifier: Modifier = Modifier) {
+    val onOpenApp = nav.openApp
+    val onOpenHost = nav.openHost
+    var section by rememberSaveable { mutableStateOf(ActivitySection.STREAM) }
     Column(modifier.fillMaxSize()) {
         Column(Modifier.padding(horizontal = 16.dp).padding(top = 8.dp)) {
             Text("Activity", style = MaterialTheme.typography.headlineSmall)
@@ -204,10 +205,71 @@ fun ActivityScreen(
                 modifier = Modifier.padding(top = 8.dp),
             )
         }
-        if (section == ActivitySection.LIVE) {
-            LiveLog(vm, onOpenApp, onOpenHost)
+        when (section) {
+            ActivitySection.STREAM -> LiveLog(vm, onOpenApp, onOpenHost)
+            ActivitySection.JOURNAL -> JournalLog(vm, onOpenApp)
+            else -> TrafficSection(vm, section, onOpenApp, onOpenHost)
+        }
+    }
+}
+
+/**
+ * IchthysOS: the journal: pause and lockdown toggles, schedule start and end, quarantines and
+ * releases, presets applied, apps put to sleep, alerts, firewall failures, verification runs,
+ * and the platform's shield proofs ("Contacts · shielded for X"). Newest first, kept across
+ * reboots. Filters: shields only, an app.
+ */
+@Composable
+private fun JournalLog(vm: GuardViewModel, onOpenApp: (String) -> Unit) {
+    val journal by vm.repo.journal.collectAsStateWithLifecycle()
+    val t = Guard.tokens
+    var shieldsOnly by rememberSaveable { mutableStateOf(false) }
+    var changesOnly by rememberSaveable { mutableStateOf(false) }
+    var pkg by rememberSaveable { mutableStateOf<String?>(null) }
+    val apps =
+        remember(journal) {
+            journal.entries.mapNotNull { e -> e.packageName?.let { it to (e.appLabel ?: it) } }.distinctBy { it.first }.sortedBy { it.second.lowercase() }
+        }
+    val rows =
+        remember(journal, shieldsOnly, changesOnly, pkg) {
+            journal.entries.asReversed().filter {
+                (!shieldsOnly || it.isShield) && (!changesOnly || !it.isShield) && (pkg == null || it.packageName == pkg)
+            }
+        }
+    val now = System.currentTimeMillis()
+    Column(Modifier.fillMaxSize()) {
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            AppFilterButton(apps, pkg) { pkg = it }
+            Chip("Shield proofs", shieldsOnly) { shieldsOnly = !shieldsOnly; if (shieldsOnly) changesOnly = false }
+            Chip("Guard changes", changesOnly) { changesOnly = !changesOnly; if (changesOnly) shieldsOnly = false }
+        }
+        HorizontalDivider(color = t.hairline, thickness = t.hairlineWidth)
+        if (rows.isEmpty()) {
+            Box(Modifier.fillMaxSize().padding(24.dp)) {
+                Text(
+                    if (journal.entries.isEmpty()) "Nothing in the journal yet. Pauses, lockdown, presets, quarantines, schedules and shield proofs land here."
+                    else "Nothing matches these filters.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = t.muted,
+                )
+            }
         } else {
-            TrafficSection(vm, section, onOpenApp, onOpenHost)
+            LazyColumn(Modifier.fillMaxSize()) {
+                items(rows.take(500), key = { "${it.timeMs}:${it.uid}:${it.code}" }) { j ->
+                    Column(Modifier.padding(horizontal = 16.dp)) {
+                        LatestJournalRow(j, now) { j.packageName?.let(onOpenApp) }
+                        Text(
+                            formatDateTime(j.timeMs) + (j.detail?.takeIf { j.isShield }?.let { " · $it" } ?: ""),
+                            style = MaterialTheme.typography.labelSmall.copy(fontFamily = t.mono),
+                            color = t.muted,
+                        )
+                    }
+                    HorizontalDivider(color = t.hairline, thickness = t.hairlineWidth)
+                }
+            }
         }
     }
 }
@@ -310,7 +372,14 @@ private fun LiveLog(
                 Chip("Blocked only", filter.blockedOnly) {
                     avm.updateFilter { it.copy(blockedOnly = !it.blockedOnly) }
                 }
-                for (type in EventType.entries) {
+                // IchthysOS: by reason ("BLOCKED · lockdown"), the way the rows are tagged.
+                ReasonFilterButton(filter.reasons) { r ->
+                    avm.updateFilter { f ->
+                        val next = if (r == null) emptySet() else if (r in f.reasons) f.reasons - r else f.reasons + r
+                        f.copy(reasons = next, blockedOnly = f.blockedOnly || next.isNotEmpty())
+                    }
+                }
+                for (type in ActivityFilter.NETWORK_TYPES) {
                     Chip(if (type == EventType.DNS) "DNS" else "Connect", type in filter.types) {
                         avm.updateFilter { f ->
                             val next = if (type in f.types) f.types - type else f.types + type
@@ -418,6 +487,30 @@ private fun LiveLog(
     selected?.let { e ->
         ModalBottomSheet(onDismissRequest = { selected = null }) {
             EventActions(vm, e, onOpenApp, onOpenHost) { selected = null }
+        }
+    }
+}
+
+/** IchthysOS: the reason filter of the stream (any number of reasons; null clears). */
+@Composable
+private fun ReasonFilterButton(selected: Set<BlockReason>, onToggle: (BlockReason?) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        OutlinedButton(onClick = { open = true }, modifier = Modifier.padding(end = 6.dp)) {
+            Text(
+                if (selected.isEmpty()) "Any reason" else selected.joinToString(" · ") { it.label },
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(text = { Text("Any reason") }, onClick = { onToggle(null); open = false })
+            for (r in BlockReason.entries.filter { it != BlockReason.NONE }) {
+                DropdownMenuItem(
+                    text = { Text((if (r in selected) "✓ " else "") + "Blocked · ${r.label}") },
+                    onClick = { onToggle(r) },
+                )
+            }
         }
     }
 }

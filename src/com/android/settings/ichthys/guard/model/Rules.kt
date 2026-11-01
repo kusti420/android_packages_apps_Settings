@@ -225,6 +225,17 @@ data class RuleBook(
     val lockdown: LockdownState = LockdownState(),
     /** Policies are included in exports so a whole setup moves between devices. */
     val policies: PolicySet = PolicySet(),
+    /**
+     * IchthysOS: the rest of a setup, so a backup really restores everything: schedules, the
+     * screen-off rule, alerts and sleep ([automation]); every per-app shield list and the storage
+     * scopes as raw Settings values ([shieldLists], key → value); the master switches
+     * ([masters], key → 0/1); the fake place ([fakePlace]: ichthys_location_spoof, _fake,
+     * _fake_name). All optional, so older backups still import.
+     */
+    val automation: AutomationSettings? = null,
+    val shieldLists: Map<String, String> = emptyMap(),
+    val masters: Map<String, Int> = emptyMap(),
+    val fakePlace: Map<String, String> = emptyMap(),
 ) {
     fun upsert(rule: CustomRule): RuleBook =
         copy(rules = rules.filterNot { it.id == rule.id } + rule)
@@ -252,6 +263,10 @@ data class RuleBook(
             rules = rules.filterNot { key(it) in importedKeys } + validImported,
             sources = sources,
             policies = pol,
+            automation = imported.automation ?: automation,
+            shieldLists = shieldLists + imported.shieldLists,
+            masters = masters + imported.masters,
+            fakePlace = fakePlace + imported.fakePlace,
         )
     }
 

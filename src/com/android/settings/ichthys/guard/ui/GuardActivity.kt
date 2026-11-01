@@ -26,11 +26,13 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -54,28 +56,24 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.android.settings.R
 import com.android.settings.ichthys.guard.data.GuardRepository
 import com.android.settings.ichthys.guard.notify.GuardNotifications
+import com.android.settings.ichthys.guard.os.ShieldGroup
 import com.android.settings.ichthys.guard.ui.theme.Guard
 import com.android.settings.ichthys.guard.ui.theme.GuardTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
+/** IchthysOS: the three destinations of the bottom bar. The gear page sits in the top bar. */
 enum class GuardTab(val label: String, val glyph: String) {
-    HOME("Home", "◉"),
+    PROTECTION("Protection", "◉"),
     APPS("Apps", "▦"),
     ACTIVITY("Activity", "≋"),
-    RULES("Rules", "≡"),
 }
 
 /**
- * Settings' Guard page: the per-app firewall and activity monitor (formerly the standalone
- * org.ichthys.guard app). Opened from the "Guard" row on the Settings homepage, from the Guard
- * row of an app's App info page ([appIntent]), from Guard's notifications and from a long-press
- * on the Lockdown / Pause tiles.
- *
- * Intents: an explicit launch from Settings itself, optionally with
- * [GuardNotifications.EXTRA_OPEN_PACKAGE] or [Intent.EXTRA_PACKAGE_NAME] to open one app's page,
- * or with [EXTRA_OPEN_PAGE] = [OPEN_PAGE_SHARED_VALUES] to open Rules > Shared values (the Weather
- * page's Location row).
+ * Guard's one activity. Three destinations (Protection, Apps, Activity) plus pages pushed on top
+ * of them: an app's page, a destination's page, the gear and its sub-pages, the verify page.
+ * IchthysOS: the page stack is a string in saved state ("a:<package>", "h:<host>", "s:<page>",
+ * ...), so Back walks it and a rotation keeps it.
  */
 class GuardActivity : ComponentActivity() {
     private val openPackage = mutableStateOf<String?>(null)
@@ -98,10 +96,7 @@ class GuardActivity : ComponentActivity() {
             GuardTheme {
                 val t = Guard.tokens
                 val vm: GuardViewModel = viewModel()
-                var tab by rememberSaveable { mutableStateOf(GuardTab.HOME) }
-                // Pages opened on top of the tabs, newest last: "a:<package>" (an app's page),
-                // "h:<destination>", "s:automation" or "s:shared". Back walks the stack, so app →
-                // destination → app works.
+                var tab by rememberSaveable { mutableStateOf(GuardTab.PROTECTION) }
                 var stack by rememberSaveable { mutableStateOf("") }
                 val pages = if (stack.isEmpty()) emptyList() else stack.split('\n')
                 val push: (String) -> Unit = { page ->
@@ -113,19 +108,32 @@ class GuardActivity : ComponentActivity() {
                     openPackage.value = null
                 }
                 openPage.value?.let {
-                    // IchthysOS: Shared values sits under Rules; land there so Back is sensible.
-                    if (it == OPEN_PAGE_SHARED_VALUES) {
-                        tab = GuardTab.RULES
-                        stack = PAGE_SHARED_VALUES
+                    when (it) {
+                        OPEN_PAGE_VERIFY -> {
+                            tab = GuardTab.PROTECTION
+                            stack = PAGE_VERIFY
+                        }
+                        OPEN_PAGE_GEAR -> stack = PAGE_GEAR
+                        // IchthysOS: quiet notifications (a gear sub-page).
+                        OPEN_PAGE_QUIET_NOTIFICATIONS -> stack = PAGE_QUIET_NOTIFICATIONS
                     }
                     openPage.value = null
                 }
                 BackHandler(enabled = pages.isNotEmpty()) { pop() }
-                BackHandler(enabled = pages.isEmpty() && tab != GuardTab.HOME) {
-                    tab = GuardTab.HOME
+                BackHandler(enabled = pages.isEmpty() && tab != GuardTab.PROTECTION) {
+                    tab = GuardTab.PROTECTION
                 }
-                val open: (String) -> Unit = { push("a:$it") }
-                val openHost: (String) -> Unit = { push("h:$it") }
+                val nav =
+                    GuardNav(
+                        openApp = { push("a:$it") },
+                        openHost = { push("h:$it") },
+                        openAbout = { push("about:$it") },
+                        openData = { pkg, group -> push("data:$pkg:${group.name}") },
+                        openPage = { push("s:$it") },
+                        openVerify = { pkg -> push(if (pkg == null) PAGE_VERIFY else "s:verify:$pkg") },
+                        openTab = { tab = it; stack = "" },
+                        back = pop,
+                    )
                 Scaffold(
                     containerColor = t.ink,
                     contentColor = t.text,
@@ -133,7 +141,7 @@ class GuardActivity : ComponentActivity() {
                         Row(
                             Modifier.fillMaxWidth()
                                 .statusBarsPadding()
-                                .padding(start = 4.dp, end = 16.dp, top = 4.dp),
+                                .padding(start = 4.dp, end = 4.dp, top = 4.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             IconButton(onClick = { onBackPressedDispatcher.onBackPressed() }) {
@@ -149,6 +157,14 @@ class GuardActivity : ComponentActivity() {
                                 style = MaterialTheme.typography.headlineSmall,
                                 color = t.text,
                             )
+                            Spacer(Modifier.weight(1f))
+                            IconButton(onClick = { push(PAGE_GEAR) }) {
+                                Icon(
+                                    Icons.Filled.Settings,
+                                    contentDescription = "Guard settings",
+                                    tint = if (pages.lastOrNull()?.startsWith("s:") == true) t.accent else t.muted,
+                                )
+                            }
                         }
                     },
                     bottomBar = {
@@ -182,45 +198,44 @@ class GuardActivity : ComponentActivity() {
                 ) { padding ->
                     val m = Modifier.padding(padding)
                     val top = pages.lastOrNull()
-                    if (top == PAGE_AUTOMATION) {
-                        AutomationScreen(vm, onOpenApp = open, onBack = pop, modifier = m)
-                    } else if (top == PAGE_SHARED_VALUES) {
-                        SharedValuesScreen(onBack = pop, modifier = m)
-                    } else if (top != null && top.startsWith("h:")) {
-                        DestinationScreen(
-                            vm,
-                            top.removePrefix("h:"),
-                            onOpenApp = open,
-                            onBack = pop,
-                            modifier = m,
-                        )
-                    } else if (top != null) {
-                        AppDetailScreen(
-                            vm,
-                            top.removePrefix("a:"),
-                            onBack = pop,
-                            onOpenHost = openHost,
-                            modifier = m,
-                        )
-                    } else {
-                        when (tab) {
-                            GuardTab.HOME ->
-                                HomeScreen(
-                                    vm,
-                                    open,
-                                    onOpenActivity = { tab = GuardTab.ACTIVITY },
-                                    modifier = m,
-                                )
-                            GuardTab.APPS -> AppsScreen(vm, open, m)
-                            GuardTab.ACTIVITY -> ActivityScreen(vm, open, openHost, m)
-                            GuardTab.RULES ->
-                                RulesScreen(
-                                    vm,
-                                    m,
-                                    onOpenAutomation = { push(PAGE_AUTOMATION) },
-                                    onOpenSharedValues = { push(PAGE_SHARED_VALUES) },
-                                )
+                    when {
+                        top == null ->
+                            when (tab) {
+                                GuardTab.PROTECTION -> ProtectionScreen(vm, nav, m)
+                                GuardTab.APPS -> AppsScreen(vm, nav, m)
+                                GuardTab.ACTIVITY -> ActivityScreen(vm, nav, m)
+                            }
+                        top == PAGE_VERIFY -> VerifyScreen(vm, nav, forPackage = null, modifier = m)
+                        top.startsWith("s:verify:") ->
+                            VerifyScreen(vm, nav, forPackage = top.removePrefix("s:verify:"), modifier = m)
+                        top == PAGE_GEAR -> GearScreen(vm, nav, m)
+                        // IchthysOS: quiet notifications (Fold ongoing / Silent section / Always
+                        // quiet). The gear page opens it with nav.openPage("quiet").
+                        top == PAGE_QUIET_NOTIFICATIONS ->
+                            QuietNotificationsScreen(vm, onBack = pop, modifier = m)
+                        top.startsWith("s:") -> GearSubPage(vm, nav, top.removePrefix("s:"), m)
+                        top.startsWith("h:") ->
+                            DestinationScreen(
+                                vm,
+                                top.removePrefix("h:"),
+                                onOpenApp = nav.openApp,
+                                onBack = pop,
+                                modifier = m,
+                            )
+                        top.startsWith("about:") -> AboutAppScreen(vm, nav, top.removePrefix("about:"), m)
+                        top.startsWith("data:") -> {
+                            val parts = top.removePrefix("data:").split(':')
+                            DataSheetScreen(
+                                vm,
+                                nav,
+                                parts[0],
+                                runCatching { ShieldGroup.valueOf(parts.getOrElse(1) { "PERSONAL" }) }
+                                    .getOrDefault(ShieldGroup.PERSONAL),
+                                m,
+                            )
                         }
+                        top.startsWith("a:") -> AppPageScreen(vm, nav, top.removePrefix("a:"), m)
+                        else -> ProtectionScreen(vm, nav, m)
                     }
                 }
             }
@@ -232,9 +247,14 @@ class GuardActivity : ComponentActivity() {
         if (!GuardRepository.isGuardUser()) return
         // The SystemUI Pause tile talks to the service directly; pick up its deadline. On a cold
         // start this is the first get(), which builds the repository (it reads Guard's stores
-        // from disk), so not on the main thread.
+        // from disk), so not on the main thread. IchthysOS: the health bits, the deny chain and
+        // the blocked counters are re-read too, so the home cards show the state now.
         val app = applicationContext
-        lifecycleScope.launch(Dispatchers.IO) { GuardRepository.get(app).refreshPause() }
+        lifecycleScope.launch(Dispatchers.IO) {
+            val repo = GuardRepository.get(app)
+            repo.refreshPause()
+            repo.refreshEvidence(force = true)
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -243,12 +263,23 @@ class GuardActivity : ComponentActivity() {
     }
 
     companion object {
-        private const val PAGE_AUTOMATION = "s:automation"
-        private const val PAGE_SHARED_VALUES = "s:shared"
+        private const val PAGE_GEAR = "s:gear"
+        private const val PAGE_VERIFY = "s:verify"
+        /** IchthysOS: QuietNotificationsScreen; nav.openPage("quiet") lands here. */
+        private const val PAGE_QUIET_NOTIFICATIONS = "s:quiet"
 
-        /** IchthysOS: which page to open on top of the tabs; only [OPEN_PAGE_SHARED_VALUES]. */
+        /** IchthysOS: which page to open on top of the tabs. */
         const val EXTRA_OPEN_PAGE = "com.android.settings.ichthys.guard.extra.OPEN_PAGE"
-        const val OPEN_PAGE_SHARED_VALUES = "shared_values"
+        const val OPEN_PAGE_VERIFY = "verify"
+        const val OPEN_PAGE_GEAR = "gear"
+        /** IchthysOS: [EXTRA_OPEN_PAGE] value for the quiet-notification controls. */
+        const val OPEN_PAGE_QUIET_NOTIFICATIONS = "quiet_notifications"
+
+        /** IchthysOS: opens Guard at the quiet-notification controls (gear > Notifications). */
+        @JvmStatic
+        fun quietNotificationsIntent(context: Context): Intent =
+            Intent(context, GuardActivity::class.java)
+                .putExtra(EXTRA_OPEN_PAGE, OPEN_PAGE_QUIET_NOTIFICATIONS)
 
         /** Opens Guard at [packageName]'s page (the stock App info page's Guard row). */
         @JvmStatic
@@ -256,11 +287,13 @@ class GuardActivity : ComponentActivity() {
             Intent(context, GuardActivity::class.java)
                 .putExtra(Intent.EXTRA_PACKAGE_NAME, packageName)
 
-        /** Opens Guard at Rules > Shared values (home city, trips, units). */
+        /**
+         * Opens Shared values (home city, trips, units). IchthysOS: the screen moved out of Guard
+         * to Settings › IchthysOS (SharedValuesActivity); the Weather page's Location row and
+         * older callers still land there through this.
+         */
         @JvmStatic
-        fun sharedValuesIntent(context: Context): Intent =
-            Intent(context, GuardActivity::class.java)
-                .putExtra(EXTRA_OPEN_PAGE, OPEN_PAGE_SHARED_VALUES)
+        fun sharedValuesIntent(context: Context): Intent = SharedValuesActivity.intent(context)
     }
 
     private fun handleIntent(intent: Intent?) {
@@ -271,3 +304,17 @@ class GuardActivity : ComponentActivity() {
         intent?.getStringExtra(EXTRA_OPEN_PAGE)?.let { openPage.value = it }
     }
 }
+
+/** IchthysOS: how the screens move around; one object so each screen takes one parameter. */
+data class GuardNav(
+    val openApp: (String) -> Unit,
+    val openHost: (String) -> Unit,
+    val openAbout: (String) -> Unit,
+    val openData: (String, ShieldGroup) -> Unit,
+    /** A gear sub-page by its id (see GearSubPage). */
+    val openPage: (String) -> Unit,
+    /** The verify page; a package name runs "Verify this app". */
+    val openVerify: (String?) -> Unit,
+    val openTab: (GuardTab) -> Unit,
+    val back: () -> Unit,
+)

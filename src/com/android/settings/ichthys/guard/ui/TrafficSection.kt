@@ -141,7 +141,8 @@ fun TrafficSection(
             )
         }
 
-        if (section == ActivitySection.DATA) {
+        // IchthysOS: bytes per app sit under Hosts now (the Data segment folded into it).
+        if (section == ActivitySection.HOSTS) {
             item {
                 GuardCard(title = "Data per app") {
                     when (val l = load) {

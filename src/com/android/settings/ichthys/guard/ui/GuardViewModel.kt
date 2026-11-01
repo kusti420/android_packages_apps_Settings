@@ -19,7 +19,9 @@ package com.android.settings.ichthys.guard.ui
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.android.settings.ichthys.guard.backend.Health
 import com.android.settings.ichthys.guard.data.GuardRepository
+import com.android.settings.ichthys.guard.data.VerifyRunner
 import com.android.settings.ichthys.guard.model.DayStats
 import com.android.settings.ichthys.guard.model.Insights
 import com.android.settings.ichthys.guard.model.LabeledEvent
@@ -35,6 +37,7 @@ import kotlinx.coroutines.flow.stateIn
 /** Shared app-wide state; screen ViewModels build on [repo]. */
 class GuardViewModel(app: Application) : AndroidViewModel(app) {
     val repo: GuardRepository = GuardRepository.get(app)
+    val verifier: VerifyRunner = VerifyRunner.get(app)
 
     val today: StateFlow<Summary> =
         combine(repo.events, repo.stats) { evs, history ->
@@ -65,6 +68,17 @@ class GuardViewModel(app: Application) : AndroidViewModel(app) {
             .map { evs -> evs.filter { it.packageName != null }.groupBy { it.packageName!! } }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
 
+    /** IchthysOS: today's blocked attempts per package, from the in-memory window. */
+    val blockedTodayByApp: StateFlow<Map<String, Int>> =
+        repo.events
+            .map { evs ->
+                val since = startOfDay()
+                evs.filter { it.event.blocked && it.event.timeMs >= since && it.packageName != null }
+                    .groupingBy { it.packageName!! }
+                    .eachCount()
+            }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+
     /** Last 7 days of persisted counters, oldest first (Home trend). */
     val week: StateFlow<List<DayStats>> =
         repo.stats
@@ -74,13 +88,13 @@ class GuardViewModel(app: Application) : AndroidViewModel(app) {
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val status: StateFlow<Status> =
-        combine(repo.pausedUntil, repo.rules, repo.osWritable) { p, r, w ->
-                Status(p, r.lockdown.enabled, w, repo.backend.isLive)
+        combine(repo.pausedUntil, repo.rules, repo.osWritable, repo.health) { p, r, w, h ->
+                Status(p, r.lockdown.enabled, w, h != Health.UNREACHABLE && repo.backend.isLive, h)
             }
             .stateIn(
                 viewModelScope,
                 SharingStarted.Eagerly,
-                Status(0, false, true, repo.backend.isLive),
+                Status(0, false, true, repo.backend.isLive, repo.health.value),
             )
 
     data class Status(
@@ -88,7 +102,19 @@ class GuardViewModel(app: Application) : AndroidViewModel(app) {
         val lockdown: Boolean,
         val osWritable: Boolean,
         val live: Boolean,
-    )
+        /** IIchthysGuard.HEALTH_* bits, or Health.UNREACHABLE. */
+        val health: Int,
+    ) {
+        /** The red card's lines; empty when everything works. */
+        val problems: List<String>
+            get() =
+                buildList {
+                    if (!live) addAll(Health.problems(Health.UNREACHABLE))
+                    else addAll(Health.problems(health).filter { !it.contains("tracker database") })
+                    if (!osWritable)
+                        add("Settings couldn't write the shield settings (WRITE_SECURE_SETTINGS denied)")
+                }
+    }
 
     companion object {
         fun startOfDay(now: Long = System.currentTimeMillis()): Long =

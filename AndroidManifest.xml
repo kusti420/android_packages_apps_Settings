@@ -6360,6 +6360,28 @@
             </intent-filter>
         </activity>
 
+        <!-- IchthysOS: Shared values (home city, trips, units, the fake place) moved out of Guard
+             to Settings › IchthysOS; the hub row and the Weather page's Location row open it. -->
+        <activity
+            android:name=".ichthys.guard.ui.SharedValuesActivity"
+            android:label="@string/ichthys_shared_values_title"
+            android:theme="@style/Theme.IchthysGuard"
+            android:exported="false"
+            android:directBootAware="false"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden" />
+
+        <!-- IchthysOS Guard verification: IchthysProbe (a user app Guard launches as a stand-in)
+             reports a phase's verdicts here. No permission can gate a user app, so the reply is
+             accepted only with the one-time token Guard handed the probe (VerifyRunner). -->
+        <receiver
+            android:name=".ichthys.guard.notify.VerifyResultReceiver"
+            android:exported="true"
+            android:directBootAware="false">
+            <intent-filter>
+                <action android:name="org.ichthys.probe.action.RESULT" />
+            </intent-filter>
+        </receiver>
+
         <!-- Notification buttons and the weekly alarm: only Guard's own PendingIntents. -->
         <receiver
             android:name=".ichthys.guard.notify.NotificationActionReceiver"
