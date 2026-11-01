@@ -213,6 +213,9 @@ class GuardActivity : ComponentActivity() {
                         // quiet). The gear page opens it with nav.openPage("quiet").
                         top == PAGE_QUIET_NOTIFICATIONS ->
                             QuietNotificationsScreen(vm, onBack = pop, modifier = m)
+                        // IchthysOS (owner): Shared values live in Guard (home city, trips,
+                        // fake place, units); Settings › IchthysOS and Weather link here too.
+                        top == PAGE_SHARED_VALUES -> SharedValuesScreen(onBack = pop, modifier = m)
                         top.startsWith("s:") -> GearSubPage(vm, nav, top.removePrefix("s:"), m)
                         top.startsWith("h:") ->
                             DestinationScreen(
@@ -267,6 +270,7 @@ class GuardActivity : ComponentActivity() {
         private const val PAGE_VERIFY = "s:verify"
         /** IchthysOS: QuietNotificationsScreen; nav.openPage("quiet") lands here. */
         private const val PAGE_QUIET_NOTIFICATIONS = "s:quiet"
+        private const val PAGE_SHARED_VALUES = "s:shared"
 
         /** IchthysOS: which page to open on top of the tabs. */
         const val EXTRA_OPEN_PAGE = "com.android.settings.ichthys.guard.extra.OPEN_PAGE"

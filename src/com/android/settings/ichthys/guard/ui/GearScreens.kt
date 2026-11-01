@@ -95,26 +95,18 @@ fun GearScreen(vm: GuardViewModel, nav: GuardNav, modifier: Modifier = Modifier)
         item {
             GuardCard {
                 NavRow("Master shields", "What every app gets of your data unless its page says otherwise", { nav.openPage("shields") }, trailing = "${masters.first} of ${masters.second} on")
+                NavRow("Shared values", "Home city, trips and units: weather, sunset and Night Light use them", { nav.openPage("shared") })
                 NavRow("Fake place", if (fakeOn) "On · ${quantity(realCount, "app")} see the real location" else "Off · every app gets the real location", { nav.openPage("fakeplace") })
                 NavRow("Screen-off rule", if (auto.screenOffAll) "On · ${quantity(auto.screenOffExempt.size, "app")} stay online" else "Off", { nav.openPage("screenoff") })
                 NavRow("Schedules", auto.activeProfiles().takeIf { it.isNotEmpty() }?.let { "Active now: " + it.joinToString { p -> p.name } } ?: "${quantity(auto.profiles.count { it.enabled }, "schedule")} on", { nav.openPage("schedules") })
                 NavRow("Lockdown keeps online", "Set on each app's page", { nav.openPage("lockdown") }, trailing = quantity(rules.lockdown.allowlist.size, "app"))
                 NavRow("New apps", if (quarantined > 0) "${quantity(quarantined, "app")} waiting for a preset" else "Quarantined until you pick a preset · local network blocked", { nav.openPage("newapps") })
+                NavRow("Notifications", "Ongoing and silent notifications folded into chips or one row", { nav.openPage("quiet") })
                 NavRow("Alerts", "Camera, mic and location in the background, wake-ups, boot starts · kept in the journal", { nav.openPage("alerts") }, trailing = "${AlertType.entries.count { auto.alertOn(it) }} of ${AlertType.entries.size}")
                 NavRow("Put unused apps to sleep", if (auto.autoTighten) "On · after ${auto.autoTightenDays} days" + (if (asleep > 0) " · ${quantity(asleep, "app")} asleep" else "") else "Off", { nav.openPage("sleep") })
                 NavRow("Service health", if (status.problems.isEmpty()) "All parts working" else status.problems.first(), { nav.openPage("health") }, danger = status.problems.isNotEmpty())
                 NavRow("Backup", "Export or import presets, every shield list, the fake place, schedules and storage scopes", { nav.openPage("backup") })
                 NavRow("Per-app tracker host rules — coming", if (hostRules > 0) "${quantity(hostRules, "saved rule")}, kept, not enforced yet" else "Saved rules are kept until the engine lands", { nav.openPage("trackers") })
-            }
-        }
-        item {
-            Text(
-                "Shared values (home city, trips, units) moved to Settings › IchthysOS › Shared values.",
-                style = MaterialTheme.typography.bodySmall,
-                color = t.muted,
-            )
-            TextButton(onClick = { val c = repo.contextForLists(); c.startActivity(SharedValuesActivity.intent(c).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }) {
-                Text("Open Shared values")
             }
         }
     }
