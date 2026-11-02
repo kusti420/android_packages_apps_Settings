@@ -30,6 +30,7 @@ import android.widget.TextView;
 
 import androidx.annotation.Nullable;
 
+import com.android.settingslib.ichthys.ShoalContrast;
 import com.android.settingslib.widget.ShoalSurfaces;
 
 import java.util.ArrayList;
@@ -128,6 +129,18 @@ public final class ShoalStyle {
         }
     }
 
+    /**
+     * IchthysOS: the accent as a glyph, outline or thin mark on a Shoal page (the ink ground and
+     * the row card): the accent itself when it reads there, else a lighter (darker in day mode)
+     * tone of it that reaches {@link ShoalContrast#GRAPHIC}. A dark accent such as indigo
+     * #3949ab sank into the ink. Fills keep {@link #accent}.
+     */
+    public static int accentGraphic(Context context) {
+        return ShoalContrast.forGraphic(accent(context),
+                context.getColor(com.android.internal.R.color.ichthys_ink),
+                ShoalSurfaces.cardColor(context));
+    }
+
     /** Category color for a preference key. */
     public static int colorFor(Context context, @Nullable String key) {
         if (key == null) {
@@ -166,15 +179,20 @@ public final class ShoalStyle {
             final boolean night = ShoalSurfaces.isNight(context);
             final boolean isAccent = color == accent(context);
             final int neutral = night ? 0xFFF2F4F1 : 0xFF12171A;
-            final int ink = isAccent ? color : neutral;
-            final int line = isAccent ? color : (night ? 0xFF3A4246 : 0xFFC4CAC7);
-            final int dots = isAccent ? color : (night ? 0xFF8B938F : 0xFF6B7370);
+            // IchthysOS: the accent glyph, outline and lattice are thin marks on the card:
+            // contrast-guarded (see accentGraphic).
+            final int mark = isAccent ? accentGraphic(context) : color;
+            final int ink = isAccent ? mark : neutral;
+            final int line = isAccent ? mark : (night ? 0xFF3A4246 : 0xFFC4CAC7);
+            final int dots = isAccent ? mark : (night ? 0xFF8B938F : 0xFF6B7370);
             return new ShoalBadgeDrawable(icon, ink, (neutral & 0x00ffffff) | 0x14000000,
                     line, ink, dots, size, radius, stroke, glyph, dot, overhang);
         }
         // Colour: ~12 % category tint fill, 1.5dp category outline, category glyph and lattice.
-        return new ShoalBadgeDrawable(icon, color, (color & 0x00ffffff) | 0x1f000000,
-                color, color, color, size, radius, stroke, glyph, dot, overhang);
+        // IchthysOS: for the accent the marks are contrast-guarded; the tint keeps the accent.
+        final int mark = color == accent(context) ? accentGraphic(context) : color;
+        return new ShoalBadgeDrawable(icon, mark, (color & 0x00ffffff) | 0x1f000000,
+                mark, mark, mark, size, radius, stroke, glyph, dot, overhang);
     }
 
     /**

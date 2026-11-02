@@ -31,6 +31,7 @@ import androidx.preference.Preference;
 import androidx.preference.PreferenceViewHolder;
 
 import com.android.settings.R;
+import com.android.settingslib.ichthys.ShoalContrast;
 import com.android.settingslib.widget.ShoalSurfaces;
 
 import com.google.android.material.chip.ChipGroup;
@@ -88,7 +89,8 @@ public class ShoalProtectedPreference extends Preference {
         if (hairline) {
             // Shoal: the ink card (#0c1013) with a 1dp accent outline.
             card.setColor(ShoalSurfaces.cardColor(c));
-            card.setStroke(Math.max(1, Math.round(dp(1))), accent);
+            // IchthysOS: a 1 dp line on the card: the contrast-guarded accent (dark accents).
+            card.setStroke(Math.max(1, Math.round(dp(1))), ShoalStyle.accentGraphic(c));
         } else {
             card.setColor((accent & 0x00ffffff) | 0x26000000);
         }
@@ -102,9 +104,9 @@ public class ShoalProtectedPreference extends Preference {
         disc.setColor(accent);
         icon.setBackground(disc);
         // Dark ink shield-check on the accent disc (#07090b). IchthysOS: white on a dark accent,
-        // where the ink glyph would all but disappear (0.18 is where the two contrast equally).
+        // where the ink glyph would all but disappear; chosen by WCAG contrast with the disc.
         icon.setImageTintList(ColorStateList.valueOf(
-                Color.luminance(accent) > 0.18f ? 0xFF07090B : 0xFFFFFFFF));
+                ShoalContrast.onFill(accent) == Color.WHITE ? 0xFFFFFFFF : 0xFF07090B));
 
         final TextView title = (TextView) holder.findViewById(android.R.id.title);
         final TextView summary = (TextView) holder.findViewById(android.R.id.summary);
