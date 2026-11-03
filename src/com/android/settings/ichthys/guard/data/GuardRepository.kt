@@ -305,7 +305,10 @@ class GuardRepository(
                 backfilled.countDown()
             }
             refreshEvidence(force = true)
-            backend.liveEvents().collect { ingest(it) }
+            // IchthysOS: one bad batch must not end the live stream for the process's life.
+            backend.liveEvents().collect { batch ->
+                runCatching { ingest(batch) }.onFailure { Log.w(TAG, "event ingest failed", it) }
+            }
         }
     }
 
@@ -533,10 +536,28 @@ class GuardRepository(
         for (app in _apps.value) {
             if (app.uid != uid || app.packageName == pkg) continue
             val other = effectiveRule(app.packageName)
-            if (other.access.ordinal > rule.access.ordinal) rule = other
+            if (other.access.ordinal > rule.access.ordinal ||
+                other.access == rule.access && reasonRank(other.reason) > reasonRank(rule.reason))
+                rule = other
         }
         return rule
     }
+
+    /**
+     * IchthysOS: between two rules of the same access the reason that must not be lifted wins:
+     * lockdown and a schedule over the user's rule, the user's rule over sleep (the service
+     * lifts a DORMANT deny when the app comes to the front, which must not free a lockdown-denied
+     * sibling of the same uid).
+     */
+    private fun reasonRank(reason: BlockReason): Int =
+        when (reason) {
+            BlockReason.LOCKDOWN -> 4
+            BlockReason.SCHEDULE -> 3
+            BlockReason.POLICY -> 2
+            BlockReason.DORMANT -> 0
+            // Behaviour and blocklist reasons sit between the user's rule and sleep.
+            else -> 1
+        }
 
     /**
      * IchthysOS: why [pkg] is offline right now, or null when it is online: the service's own
@@ -618,9 +639,8 @@ class GuardRepository(
         val listed = _apps.value.mapTo(HashSet()) { it.packageName }
         for ((pkg, policy) in _policies.value.policies) {
             if (pkg in listed) continue
-            val want =
-                if (policy.dormant) UidRule(NetworkAccess.DENY, BlockReason.DORMANT)
-                else UidRule(policy.network, BlockReason.POLICY)
+            // IchthysOS: the same rule as for listed apps (lockdown and profiles included).
+            val want = effectiveRule(pkg)
             if (want.access == NetworkAccess.ALLOW) continue
             val app = inspector.app(pkg) ?: continue
             val prev = table[app.uid]
@@ -758,13 +778,17 @@ class GuardRepository(
 
     fun setLockdownAllowed(pkg: String, allowed: Boolean) {
         val lock = _rules.value.lockdown
-        // The user is choosing the list; never replace it with the defaults afterwards.
+        // The first edit starts from the defaults (dialer, messaging, the ROM's own apps):
+        // a preset that keeps one messenger online must not leave everything else dark at the
+        // first lockdown. From then on the user is choosing the list.
+        val seeded = prefs.getBoolean(KEY_LOCKDOWN_SEEDED, false)
+        val base = if (lock.allowlist.isEmpty() && !seeded) defaultLockdownAllowlist() else lock.allowlist
         prefs.edit().putBoolean(KEY_LOCKDOWN_SEEDED, true).apply()
         saveRules(
             _rules.value.copy(
                 lockdown =
                     lock.copy(
-                        allowlist = if (allowed) lock.allowlist + pkg else lock.allowlist - pkg
+                        allowlist = if (allowed) base + pkg else base - pkg
                     )
             )
         )
@@ -776,7 +800,10 @@ class GuardRepository(
         _apps.value
             .map { it.packageName }
             .filter { p -> DEFAULT_LOCKDOWN_HINTS.any { p.contains(it) } }
-            .toSet()
+            .toSet() +
+            // IchthysOS: the always-on VPN, companions and the wallet must stay reachable too,
+            // or lockdown drops the tunnel (and with Android's VPN lockdown, everything).
+            backgroundRoles()
 
     fun pause(minutes: Int) {
         backend.pauseEnforcement(minutes)
@@ -1289,7 +1316,9 @@ class GuardRepository(
 
     /** True when the fake place is on for everyone not on the real list (Gear › Spoofed values). */
     fun fakePlaceOn(): Boolean =
-        Settings.Secure.getString(context.contentResolver, ShieldTable.KEY_SPOOF_ON) != "0"
+        Settings.Secure.getString(context.contentResolver, ShieldTable.KEY_SPOOF_ON) != "0" &&
+            // The platform spoofs only with a place set (IchthysLocationSpoof.read).
+            !Settings.Secure.getString(context.contentResolver, ShieldTable.KEY_SPOOF_FAKE).isNullOrBlank()
 
     /** The spoofed values that go with the fake place, or null when only the position is faked. */
     fun spoofProfile(): SpoofProfile? = ShieldTable.spoofProfile(context)

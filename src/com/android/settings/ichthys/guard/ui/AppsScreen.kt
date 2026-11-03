@@ -84,9 +84,10 @@ fun AppsScreen(vm: GuardViewModel, nav: GuardNav, modifier: Modifier = Modifier)
     val lastVerified = remember(verify) { verifiedAt(verify.runs) }
     val presetVerified = remember(verify) { presetVerifiedAt(verify.runs) }
     val now = System.currentTimeMillis()
+    val paused = status.pausedUntil > now
 
     val rows =
-        remember(apps, policies, denyNow, blockedToday, tick, query, chip, status, quarantined, lastVerified, unfinished) {
+        remember(apps, policies, denyNow, blockedToday, tick, query, chip, status, paused, quarantined, lastVerified, unfinished) {
             apps
                 .filter { a ->
                     (chip == AppChip.SYSTEM || !a.isSystem) &&

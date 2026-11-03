@@ -126,6 +126,11 @@
     <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
     <uses-permission android:name="android.permission.MANAGE_APP_OPS_RESTRICTIONS"/>
     <uses-permission android:name="android.permission.MANAGE_APP_OPS_MODES" />
+    <!-- IchthysOS: Guard's Full access preset grants and takes back an app's runtime
+         permissions in one go (FullAccessGranter). Both are signature-level, so the platform
+         signature grants them; no privapp entry needed. -->
+    <uses-permission android:name="android.permission.GRANT_RUNTIME_PERMISSIONS" />
+    <uses-permission android:name="android.permission.REVOKE_RUNTIME_PERMISSIONS" />
     <uses-permission android:name="android.permission.HIDE_NON_SYSTEM_OVERLAY_WINDOWS"/>
     <uses-permission android:name="android.permission.READ_PRINT_SERVICES" />
     <uses-permission android:name="android.permission.NETWORK_SETTINGS" />
@@ -6393,6 +6398,17 @@
             android:directBootAware="false">
             <intent-filter>
                 <action android:name="org.ichthys.probe.action.RESULT" />
+            </intent-filter>
+        </receiver>
+        <!-- IchthysOS: the tester's "Check everything" asks Guard to run its verification; the
+             receiver accepts only a broadcast whose shared sender identity is org.ichthys.probe
+             (VerifyRequestReceiver). -->
+        <receiver
+            android:name=".ichthys.guard.notify.VerifyRequestReceiver"
+            android:exported="true"
+            android:directBootAware="false">
+            <intent-filter>
+                <action android:name="org.ichthys.guard.action.VERIFY_REQUEST" />
             </intent-filter>
         </receiver>
 

@@ -56,6 +56,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
@@ -166,8 +170,11 @@ fun ToggleRow(
     enabled: Boolean = true,
     onChange: (Boolean) -> Unit,
 ) {
+    // The whole row toggles and reads as one switch with its label (TalkBack, touch target).
     Row(
-        Modifier.fillMaxWidth().padding(vertical = 6.dp),
+        Modifier.fillMaxWidth()
+            .toggleable(value = checked, enabled = enabled, role = Role.Switch, onValueChange = onChange)
+            .padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
@@ -179,7 +186,7 @@ fun ToggleRow(
                     color = Guard.tokens.muted,
                 )
         }
-        Switch(checked = checked, onCheckedChange = onChange, enabled = enabled)
+        Switch(checked = checked, onCheckedChange = null, enabled = enabled)
     }
 }
 
@@ -445,6 +452,8 @@ fun PresetDot(shown: Boolean) {
         Modifier.padding(start = 6.dp)
             .size(8.dp)
             .background(t.accent, androidx.compose.foundation.shape.CircleShape)
+            // Colour alone says nothing to TalkBack.
+            .semantics { contentDescription = "Changed from the preset" }
     )
 }
 

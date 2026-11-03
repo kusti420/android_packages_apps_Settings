@@ -180,6 +180,45 @@ class VerifyResultReceiver : BroadcastReceiver() {
     }
 }
 
+/**
+ * IchthysOS: the tester app's "Check everything" button asks Guard to run "Verify my protection"
+ * (every stand-in, the probe as the tester). Exported without a permission (a testkey user app
+ * can hold none), so the sender is checked instead: the probe sends with its identity shared
+ * (BroadcastOptions.setShareIdentityEnabled) and only org.ichthys.probe is accepted; the probe
+ * must also be the app on screen. Nothing is granted here: the run uses Guard's presets and
+ * puts the probe's own setup back, as every verification does.
+ */
+class VerifyRequestReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action != ACTION_VERIFY_REQUEST || !GuardRepository.isGuardUser()) return
+        if (sentFromPackage != VerifyRunner.PROBE_PACKAGE) {
+            android.util.Log.w("IchthysGuard", "verify request from ${sentFromPackage ?: "an unnamed sender"} ignored")
+            return
+        }
+        if (context.getSystemService(UserManager::class.java)?.isUserUnlocked != true) return
+        val pending = goAsync()
+        Thread {
+                try {
+                    val error = VerifyRunner.get(context).start(null, fromProbe = true)
+                    if (error != null) {
+                        android.os.Handler(android.os.Looper.getMainLooper()).post {
+                            android.widget.Toast.makeText(context, error, android.widget.Toast.LENGTH_LONG).show()
+                        }
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.w("IchthysGuard", "verify request failed", e)
+                } finally {
+                    pending.finish()
+                }
+            }
+            .start()
+    }
+
+    companion object {
+        const val ACTION_VERIFY_REQUEST = "org.ichthys.guard.action.VERIFY_REQUEST"
+    }
+}
+
 class WeeklyReportReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (!GuardRepository.isGuardUser()) return

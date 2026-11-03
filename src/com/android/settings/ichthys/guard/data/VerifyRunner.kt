@@ -121,7 +121,7 @@ class VerifyRunner private constructor(private val context: Context) {
      * setup copied over); null runs the three-phase "Verify my protection". Returns an error
      * sentence, or null when the first phase was launched. Off the main thread.
      */
-    fun start(forPackage: String?): String? {
+    fun start(forPackage: String?, fromProbe: Boolean = false): String? {
         val status = probeStatus()
         if (!status.installed)
             return "IchthysProbe isn't installed. Build it with `m IchthysProbe` and install it " +
@@ -131,12 +131,17 @@ class VerifyRunner private constructor(private val context: Context) {
         if (!repo.backend.isLive) return "The Guard service isn't reachable; nothing to verify."
         synchronized(lock) {
             if (_current.value?.done == false) return "A verification is already running."
+            // IchthysOS: when the owner gave the tester Full access (every permission, nothing
+            // shielded), a fourth phase checks the other direction: real data must come through.
+            val probeFull = repo.policies.value.policyFor(PROBE_PACKAGE).preset == AppPreset.FULL_ACCESS
             val phases =
                 if (forPackage == null)
-                    listOf(
+                    listOfNotNull(
                         VerifyPhase(AppPreset.UNTRUSTED, "Blocked app: firewall, shields, no location"),
                         VerifyPhase(AppPreset.MESSENGER, "Messenger: fake place, picked contacts"),
                         VerifyPhase(AppPreset.MAPS, "Maps: online, real location"),
+                        if (probeFull) VerifyPhase(AppPreset.FULL_ACCESS, "Full access: real data must come through")
+                        else null,
                     )
                 else {
                     val preset = repo.policies.value.policyFor(forPackage).preset
@@ -157,6 +162,7 @@ class VerifyRunner private constructor(private val context: Context) {
                     buildId = android.os.Build.ID,
                     probeVersion = status.version,
                     probeInSystem = status.inSystem,
+                    fromProbe = fromProbe,
                 )
             snapshotProbe()
             _current.value = run
@@ -212,7 +218,21 @@ class VerifyRunner private constructor(private val context: Context) {
     /** What the probe should find, from its effective state right now. */
     private fun putExpectations(intent: Intent, pkg: String) {
         val rule = repo.effectiveRule(pkg)
-        intent.putExtra(EXTRA_EXPECT_NET, if (rule.access == NetworkAccess.DENY) "blocked" else "allowed")
+        // Wi-Fi only: blocked on a metered network right now, allowed otherwise (the probe only
+        // knows "blocked" and "allowed"; the metered chain is what it would hit).
+        val metered =
+            runCatching {
+                    context.getSystemService(ConnectivityManager::class.java)?.isActiveNetworkMetered == true
+                }
+                .getOrDefault(false)
+        intent.putExtra(
+            EXTRA_EXPECT_NET,
+            when (rule.access) {
+                NetworkAccess.DENY -> "blocked"
+                NetworkAccess.UNMETERED_ONLY -> if (metered) "blocked" else "allowed"
+                NetworkAccess.ALLOW -> "allowed"
+            },
+        )
         intent.putExtra("qap", "granted")
         val location = repo.locationMode(pkg)
         val fakeOn = repo.fakePlaceOn()
@@ -293,7 +313,9 @@ class VerifyRunner private constructor(private val context: Context) {
     /** The probe's answer (any thread). Ignored unless [token] is the one of the open phase. */
     fun onResult(token: String?, extras: Bundle?) {
         if (token == null || extras == null) return
-        finishPhase(token, extras, null)
+        // IchthysOS: a reply with an "error" extra (the probe was busy with another run) is a
+        // failed phase, not an empty pass.
+        finishPhase(token, extras, extras.getString(EXTRA_ERROR)?.takeIf { it.isNotBlank() })
     }
 
     /** The phase's alarm went off without an answer. */
@@ -306,6 +328,12 @@ class VerifyRunner private constructor(private val context: Context) {
             if (prefs.getString(KEY_TOKEN, null) != token) return
             prefs.edit().remove(KEY_TOKEN).apply()
             cancelTimeout(token)
+            // IchthysOS: Settings died mid-run (the probe's answer or the alarm built a fresh
+            // runner): the run is lost, but the probe must get its own setup back.
+            if (_current.value == null) {
+                restorePendingSnapshot()
+                return
+            }
             val run = _current.value ?: return
             val index = prefs.getInt(KEY_PHASE, -1)
             if (index !in run.phases.indices) return
@@ -337,12 +365,18 @@ class VerifyRunner private constructor(private val context: Context) {
             _current.value = updated
             repo.recordVerifyRun(updated)
             repo.journal(JournalKind.SELF_TEST, updated.verdictLine, run.forPackage)
-            // Back to Guard, on the Verify page, with the result.
+            // Back to where the run was asked for: Guard's Verify page, or the tester's own
+            // screen when its "Check everything" button started the run.
             try {
                 context.startActivity(
-                    Intent(context, GuardActivity::class.java)
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                        .putExtra(GuardActivity.EXTRA_OPEN_PAGE, GuardActivity.OPEN_PAGE_VERIFY)
+                    if (run.fromProbe)
+                        Intent()
+                            .setClassName(PROBE_PACKAGE, PROBE_ACTIVITY)
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                    else
+                        Intent(context, GuardActivity::class.java)
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                            .putExtra(GuardActivity.EXTRA_OPEN_PAGE, GuardActivity.OPEN_PAGE_VERIFY)
                 )
             } catch (e: RuntimeException) {
                 Log.w(TAG, "could not return to Guard", e)
@@ -408,6 +442,7 @@ class VerifyRunner private constructor(private val context: Context) {
             id.startsWith("location.") || id == "bt.le_scan" || id == "bt.discovery" ||
                 id == "wifi.scan_results" || id == "wifi.connection" || id == "phone.cell_info" ->
                 VerifyCategory.LOCATION
+            id == "guard.net_matches" -> VerifyCategory.FIREWALL
             id.startsWith("guard.") -> VerifyCategory.SERVICE
             probeCategory == "Network" -> VerifyCategory.FIREWALL
             else -> VerifyCategory.SHIELDS
@@ -475,10 +510,10 @@ class VerifyRunner private constructor(private val context: Context) {
             if ((PROBE_PACKAGE in repo.rules.value.lockdown.allowlist) != keep)
                 repo.setLockdownAllowed(PROBE_PACKAGE, keep)
             repo.syncOsListsFromSettings()
-        } catch (e: RuntimeException) {
-            Log.w(TAG, "probe setup not restored", e)
-        } finally {
             prefs.edit().remove(KEY_SNAPSHOT).apply()
+        } catch (e: RuntimeException) {
+            // IchthysOS: kept, so the next start tries again instead of losing the setup.
+            Log.w(TAG, "probe setup not restored; kept for the next start", e)
         }
     }
 
@@ -577,6 +612,8 @@ class VerifyRunner private constructor(private val context: Context) {
         const val EXTRA_IN_SYSTEM = "in_system"
         const val EXTRA_DIFF = "diff"
         const val EXTRA_REPORT = "report"
+        /** IchthysOS: set by the probe when the phase could not run (it was busy); a phase error. */
+        const val EXTRA_ERROR = "error"
 
         @Volatile private var instance: VerifyRunner? = null
 

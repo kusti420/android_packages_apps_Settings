@@ -63,11 +63,21 @@ data class PresetSpec(
     val scans: ScanMode,
     /** Contacts: "pkg:picked" in the contacts list (only the contacts picked for it). */
     val contactsPicked: Boolean = false,
-    /** Exact sensor data (ichthys_sensor_exempt_pkgs). */
-    val sensorsReal: Boolean = true,
+    /**
+     * Exact sensor data (ichthys_sensor_exempt_pkgs). Off by default: rounded, slowed motion
+     * sensors are the Shielded state (AppPolicy.sensorsExempt = false); only Maps (heading) and
+     * Full access get the exact ones.
+     */
+    val sensorsReal: Boolean = false,
     val nfcBlocked: Boolean = false,
     /** Keeps its network when Lockdown is on. */
     val lockdownKeep: Boolean = false,
+    /**
+     * IchthysOS: nothing shielded: every allow list on, every protect list off, real contacts,
+     * tracker rules off, never put to sleep. Only [AppPreset.FULL_ACCESS] sets it; applied from
+     * the app page it also grants every permission the app asks for (FullAccessGranter).
+     */
+    val fullAccess: Boolean = false,
 )
 
 /** IchthysOS: the presets of the app page. [CUSTOM] has no table: the user's own choices. */
@@ -81,11 +91,36 @@ enum class AppPreset(val label: String, val summary: String) {
     BROWSER("Browser", "Online while on screen; no location; everything shielded"),
     GAME("Game", "Wi-Fi only; no location, no scans, rounded sensors; everything shielded"),
     UNTRUSTED("Untrusted", "No network, no location, empty scans, no NFC; everything shielded"),
-    CUSTOM("Custom", "Your own choices");
+    CUSTOM("Custom", "Your own choices"),
+    /**
+     * IchthysOS: nothing withheld, faked or shielded, plus every permission the app asks for.
+     * Meant for the tester app (Verify) and an app you fully trust. The page asks twice before
+     * applying it, and leaving it takes back the permissions Guard granted. Not in [PICKER]: the
+     * first-launch review never offers it.
+     */
+    FULL_ACCESS(
+        "Full access",
+        "Every permission it asks for, your real data everywhere, online always; nothing withheld, faked or shielded. For the tester app",
+    );
+
+    /** True for the one preset that needs the page's two-step confirmation. */
+    val requiresDoubleConfirmation: Boolean
+        get() = this == FULL_ACCESS
 
     val spec: PresetSpec?
         get() =
             when (this) {
+                FULL_ACCESS ->
+                    PresetSpec(
+                        network = NetworkAccess.ALLOW,
+                        screenOff = ScreenOffMode.STAY_ONLINE,
+                        backgroundOff = false,
+                        lan = LocalNetwork.ALLOW,
+                        location = LocationMode.REAL,
+                        scans = ScanMode.REAL,
+                        sensorsReal = true,
+                        fullAccess = true,
+                    )
                 MAPS ->
                     PresetSpec(
                         network = NetworkAccess.ALLOW,
@@ -94,12 +129,16 @@ enum class AppPreset(val label: String, val summary: String) {
                         lan = LocalNetwork.BLOCK,
                         location = LocationMode.REAL,
                         scans = ScanMode.REAL,
+                        // Heading and turn-by-turn need the exact compass and gyroscope.
+                        sensorsReal = true,
                     )
                 MESSENGER ->
                     PresetSpec(
                         network = NetworkAccess.ALLOW,
                         screenOff = ScreenOffMode.STAY_ONLINE,
-                        backgroundOff = true,
+                        // Messages must arrive while another app is in front or the screen is
+                        // off: "foreground only" would contradict STAY_ONLINE and lockdownKeep.
+                        backgroundOff = false,
                         lan = LocalNetwork.BLOCK,
                         location = LocationMode.FAKE,
                         scans = ScanMode.REAL,
@@ -182,6 +221,11 @@ data class AppControls(
     val lockdownKeep: Boolean,
     /** Allow lists the app is on that the preset would clear (their shield labels). */
     val otherAllowed: List<String>,
+    /**
+     * IchthysOS: allow lists the app is NOT on (their shield labels), which only the Full access
+     * preset minds: there, every one of them is a control changed away from the preset.
+     */
+    val otherShielded: List<String> = emptyList(),
 ) {
     /** The controls that differ from [spec]; empty when the app is exactly on its preset. */
     fun differences(spec: PresetSpec): Set<PresetControl> =
@@ -192,10 +236,16 @@ data class AppControls(
             if (lan != spec.lan) add(PresetControl.LAN)
             if (location != spec.location) add(PresetControl.LOCATION)
             if (scans != spec.scans) add(PresetControl.SCANS)
-            if (contactsReal || contactsPicked != spec.contactsPicked) add(PresetControl.CONTACTS)
+            if (spec.fullAccess) {
+                // Full access: real contacts and every other allow list on.
+                if (!contactsReal) add(PresetControl.CONTACTS)
+                if (otherShielded.isNotEmpty()) add(PresetControl.OTHER_SHIELDS)
+            } else {
+                if (contactsReal || contactsPicked != spec.contactsPicked) add(PresetControl.CONTACTS)
+                if (otherAllowed.isNotEmpty()) add(PresetControl.OTHER_SHIELDS)
+            }
             if (sensorsReal != spec.sensorsReal) add(PresetControl.SENSORS)
             if (nfcBlocked != spec.nfcBlocked) add(PresetControl.NFC)
             if (lockdownKeep != spec.lockdownKeep) add(PresetControl.LOCKDOWN_KEEP)
-            if (otherAllowed.isNotEmpty()) add(PresetControl.OTHER_SHIELDS)
         }
 }

@@ -101,8 +101,35 @@ object IchthysProtect {
                 packages.sorted().joinToString(",").ifEmpty { null },
                 userId,
             )
+            notifyShieldedProviders(context, key)
         } catch (e: SecurityException) {
             Log.w(TAG, "no WRITE_SECURE_SETTINGS; $key not written", e)
+        }
+    }
+
+    /**
+     * IchthysOS: a provider shield answers with an empty cursor that carries the provider's
+     * notification URI, so a loader in the app reloads on the next change. Allowing or shielding
+     * an app is such a change: say so, or the app shows stale data until something else changes.
+     */
+    private fun notifyShieldedProviders(context: Context, key: String) {
+        val uris =
+            when {
+                key.startsWith("ichthys_contacts_") ->
+                    listOf(android.provider.ContactsContract.AUTHORITY_URI)
+                key.startsWith("ichthys_calendar_") ->
+                    listOf(android.provider.CalendarContract.CONTENT_URI)
+                key.startsWith("ichthys_call_log_") -> listOf(android.provider.CallLog.CONTENT_URI)
+                key.startsWith("ichthys_sms_") || key.startsWith("ichthys_mms_") ->
+                    listOf(
+                        android.provider.Telephony.MmsSms.CONTENT_URI,
+                        android.provider.Telephony.Sms.CONTENT_URI,
+                    )
+                else -> emptyList()
+            }
+        for (uri in uris) {
+            runCatching { context.contentResolver.notifyChange(uri, null) }
+                .onFailure { Log.w(TAG, "notifyChange($uri) failed", it) }
         }
     }
 

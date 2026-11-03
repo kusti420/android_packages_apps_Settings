@@ -44,6 +44,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.android.settings.ichthys.guard.model.AppPreset
 import com.android.settings.ichthys.guard.model.VerifyRun
 import com.android.settings.ichthys.guard.ui.theme.Guard
 import kotlinx.coroutines.Dispatchers
@@ -65,14 +66,22 @@ fun VerifyScreen(vm: GuardViewModel, nav: GuardNav, forPackage: String?, modifie
     val running by vm.verifier.current.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     var message by remember { mutableStateOf<String?>(null) }
+    // The initial value is computed once (three binder calls), not on every recomposition.
+    val initialProbe = remember { vm.verifier.probeStatus() }
     val probe by
-        produceState(vm.verifier.probeStatus(), running) {
+        produceState(initialProbe, running) {
             value = withContext(Dispatchers.IO) { vm.verifier.probeStatus() }
         }
+    // IchthysOS: the tester's Full access toggle (every permission, nothing shielded; two
+    // confirmations), so no check is ever "not tested: needs a permission".
+    val policies by repo.policies.collectAsStateWithLifecycle()
+    val probeFull = policies.policyFor(PROBE).preset == AppPreset.FULL_ACCESS
+    var confirmFullAccess by remember { mutableStateOf(false) }
+    // A per-app page shows that app's runs only, never a general run under its header.
     val shown: VerifyRun? =
         running?.takeIf { !it.done }
             ?: history.runs.firstOrNull { it.done && it.forPackage == forPackage }
-            ?: history.runs.firstOrNull { it.done }
+            ?: if (forPackage == null) history.runs.firstOrNull { it.done } else null
     val appLabel = forPackage?.let { repo.appFor(it)?.label ?: it }
     val now = System.currentTimeMillis()
 
@@ -105,6 +114,39 @@ fun VerifyScreen(vm: GuardViewModel, nav: GuardNav, forPackage: String?, modifie
                     "IchthysProbe is still quarantined",
                     "Open it once from the launcher and release it (any preset), then come back and verify.",
                 )
+            }
+        }
+        if (probe.installed && !probe.inSystem) {
+            item {
+                GuardCard(title = "Tester app") {
+                    ToggleRow(
+                        "Full access for the tester",
+                        probeFull,
+                        if (probeFull)
+                            "Every permission granted, nothing shielded: every check can run. A run as IchthysProbe itself must then show real data coming through."
+                        else
+                            "Grants IchthysProbe every permission it asks for and lifts every shield for it, after two confirmations. Without it, checks that need a permission stay untested.",
+                        enabled = running?.done != false,
+                    ) { on ->
+                        if (on) confirmFullAccess = true
+                        else
+                            scope.launch(Dispatchers.IO) {
+                                repo.resetToShielded(PROBE)
+                                repo.revokeFullAccess(PROBE)
+                            }
+                    }
+                    Text(
+                        "Verify my protection still runs the tester as a blocked app, a messenger and a maps app: its permissions stay, only Guard's lists change for each phase, and its own setup comes back afterwards.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = t.muted,
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
+                    if (probeFull && forPackage != PROBE) {
+                        TextButton(onClick = { nav.openVerify(PROBE) }) {
+                            Text("Verify with full access: real data must come through")
+                        }
+                    }
+                }
             }
         }
         item {
@@ -235,9 +277,24 @@ fun VerifyScreen(vm: GuardViewModel, nav: GuardNav, forPackage: String?, modifie
             }
         }
     }
+
+    if (confirmFullAccess) {
+        FullAccessConfirmation(
+            appLabel = repo.appFor(PROBE)?.label ?: "IchthysProbe",
+            packageName = PROBE,
+            onConfirm = {
+                confirmFullAccess = false
+                scope.launch(Dispatchers.IO) {
+                    repo.applyPreset(PROBE, AppPreset.FULL_ACCESS, grantPermissions = true)
+                }
+            },
+            onDismiss = { confirmFullAccess = false },
+        )
+    }
 }
 
 private const val VerifyRun_HISTORY_SHOWN = 10
+private const val PROBE = com.android.settings.ichthys.guard.data.VerifyRunner.PROBE_PACKAGE
 
 @Composable
 private fun Warn(title: String, text: String) {

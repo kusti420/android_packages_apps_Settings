@@ -67,10 +67,11 @@ data class Shield(
     val realRes: Int = 0,
 ) {
     /** True when the app gets the protected answer from every key of this shield. */
-    fun isProtected(context: Context, pkg: String): Boolean {
-        val listed = keys.all { IchthysProtect.isListed(context, it, pkg) }
-        return if (listedMeansReal) !listed else listed
-    }
+    fun isProtected(context: Context, pkg: String): Boolean =
+        // ALLOW polarity: protected only while on none of the keys (a multi-key row such as
+        // "writes" is lifted as soon as one list names the app); PROTECT: listed on all.
+        if (listedMeansReal) keys.none { IchthysProtect.isListed(context, it, pkg) }
+        else keys.all { IchthysProtect.isListed(context, it, pkg) }
 
     fun setProtected(context: Context, pkg: String, protect: Boolean) {
         val listed = if (listedMeansReal) !protect else protect

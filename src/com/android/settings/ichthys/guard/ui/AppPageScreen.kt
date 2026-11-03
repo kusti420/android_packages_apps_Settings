@@ -127,7 +127,7 @@ fun AppPageScreen(
         version++
     }
     val offline = denyNow[app?.uid]
-    val lastVerified = remember(verify) { verify.runs.firstOrNull { it.done && it.forPackage == packageName } }
+    val lastVerified = remember(verify, packageName) { verify.runs.firstOrNull { it.done && it.forPackage == packageName } }
 
     LazyColumn(modifier, contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
@@ -322,9 +322,9 @@ fun AppPageScreen(
                 )
                 if (controls.location == LocationMode.NONE)
                     Note("Empty while location is None.")
-                val personal = remember(version, tick) { sheetSummary(repo, packageName, ShieldGroup.PERSONAL, app?.isSystem == true) }
-                val device = remember(version, tick) { sheetSummary(repo, packageName, ShieldGroup.DEVICE, app?.isSystem == true) }
-                val radio = remember(version, tick) { sheetSummary(repo, packageName, ShieldGroup.RADIO, app?.isSystem == true) }
+                val personal = remember(version, tick, packageName) { sheetSummary(repo, packageName, ShieldGroup.PERSONAL, app?.isSystem == true) }
+                val device = remember(version, tick, packageName) { sheetSummary(repo, packageName, ShieldGroup.DEVICE, app?.isSystem == true) }
+                val radio = remember(version, tick, packageName) { sheetSummary(repo, packageName, ShieldGroup.RADIO, app?.isSystem == true) }
                 Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                     NavRow(ShieldGroup.PERSONAL.label, personal, { nav.openData(packageName, ShieldGroup.PERSONAL) }, Modifier.weight(1f))
                     PresetDot(PresetControl.CONTACTS in differs || PresetControl.OTHER_SHIELDS in differs)
@@ -343,7 +343,7 @@ fun AppPageScreen(
         // ---- EVIDENCE ----
         item {
             GuardCard(title = "Evidence") {
-                val proofs = remember(journal) { journal.entries.filter { it.packageName == packageName && it.isShield }.takeLast(3).asReversed() }
+                val proofs = remember(journal, packageName) { journal.entries.filter { it.packageName == packageName && it.isShield }.takeLast(3).asReversed() }
                 if (events.isEmpty() && proofs.isEmpty())
                     Text("No network activity or shield decision recorded for this app yet.", color = t.muted)
                 for (e in events.takeLast(8).asReversed()) {

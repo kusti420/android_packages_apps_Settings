@@ -251,8 +251,9 @@ data class RuleBook(
      */
     fun merge(imported: RuleBook): RuleBook {
         val key = { r: CustomRule -> r.packageName to HostPattern.normalize(r.pattern) }
-        val importedKeys = imported.rules.map(key).toSet()
         val validImported = imported.rules.filter { HostPattern.validate(it.pattern) == null }
+        // Only a valid imported rule replaces a local one; an invalid one changes nothing.
+        val importedKeys = validImported.map(key).toSet()
         val sources =
             sources.map { s ->
                 imported.sources.firstOrNull { it.id == s.id }?.let { s.copy(enabled = it.enabled) }

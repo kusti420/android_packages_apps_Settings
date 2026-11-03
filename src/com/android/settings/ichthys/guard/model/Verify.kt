@@ -89,6 +89,8 @@ data class VerifyRun(
     val probeInSystem: Boolean = false,
     /** Probes whose verdict changed since the previous run, "id: old → new". */
     val diff: List<String> = emptyList(),
+    /** IchthysOS: asked for by the tester's own "Check everything" button; Guard returns there. */
+    val fromProbe: Boolean = false,
 ) {
     val done: Boolean
         get() = finishedMs != 0L
@@ -110,6 +112,8 @@ data class VerifyRun(
         get() =
             when {
                 !done -> "Running · phase ${phases.count { it.done } + 1} of ${phases.size}"
+                // No judged check at all is not a pass: say so.
+                passed && pass == 0 -> "Nothing tested · give the tester its permissions (Full access)"
                 passed -> "Passed · ${pass} checks"
                 else -> "Failed · ${fail} of ${pass + fail} checks"
             }
@@ -199,7 +203,17 @@ data class JournalLog(val entries: List<JournalEntry> = emptyList()) {
     fun plus(new: List<JournalEntry>): JournalLog {
         if (new.isEmpty()) return this
         val seen = entries.mapTo(HashSet()) { Triple(it.timeMs, it.uid, it.code) }
-        val fresh = new.filter { seen.add(Triple(it.timeMs, it.uid, it.code)) }
+        // IchthysOS: Guard writes its own entry at once and the service echoes it with its
+        // own clock, so the same (uid, code, detail) within a few seconds is one entry.
+        val recent = entries.takeLast(200)
+        val fresh =
+            new.filter { n ->
+                seen.add(Triple(n.timeMs, n.uid, n.code)) &&
+                    recent.none { e ->
+                        e.uid == n.uid && e.code == n.code && e.detail == n.detail &&
+                            kotlin.math.abs(e.timeMs - n.timeMs) < ECHO_WINDOW_MS
+                    }
+            }
         if (fresh.isEmpty()) return this
         return JournalLog((entries + fresh).sortedBy { it.timeMs }.takeLast(MAX))
     }
@@ -208,6 +222,8 @@ data class JournalLog(val entries: List<JournalEntry> = emptyList()) {
 
     companion object {
         const val MAX = 1_000
+        /** How far apart Guard's own copy and the service's echo of one entry may be. */
+        const val ECHO_WINDOW_MS = 5_000L
         private val json = Json {
             ignoreUnknownKeys = true
             coerceInputValues = true
