@@ -22,6 +22,7 @@ import android.net.Uri
 import android.provider.Settings
 import com.android.settings.R
 import com.android.settings.ichthys.guard.model.OsSettingKey
+import com.android.settings.ichthys.guard.model.SpoofProfile
 import com.android.settings.ichthys.protect.IchthysProtect
 import org.json.JSONArray
 import org.json.JSONObject
@@ -117,6 +118,16 @@ object ShieldTable {
     const val KEY_SPOOF_ON = "ichthys_location_spoof"
     const val KEY_SPOOF_FAKE = "ichthys_location_fake"
     const val KEY_SPOOF_FAKE_NAME = "ichthys_location_fake_name"
+    /**
+     * The spoofed values that go with the fake place (one JSON string, [SpoofProfile]): country,
+     * time zone, carrier, language, sales code and whether spoofed apps need a VPN. Unset =
+     * only the position is faked.
+     */
+    const val KEY_SPOOF_PROFILE = "ichthys_location_profile"
+
+    /** The fake place and its spoofed values, for the backup and the observers. */
+    val SPOOF_KEYS: List<String> =
+        listOf(KEY_SPOOF_ON, KEY_SPOOF_FAKE, KEY_SPOOF_FAKE_NAME, KEY_SPOOF_PROFILE)
 
     /** The contacts list's "only the contacts picked for it" entry suffix (IchthysShields). */
     const val PICKED_SUFFIX = ":picked"
@@ -434,7 +445,33 @@ object ShieldTable {
 
     /** Every setting the app page shows, so it follows changes made elsewhere while open. */
     val OBSERVED_URIS: List<Uri> by lazy {
-        ALL_LIST_KEYS.map { Settings.Secure.getUriFor(it) } + MASTER_SWITCHES.map { it.uri }
+        (ALL_LIST_KEYS.map { Settings.Secure.getUriFor(it) } +
+                MASTER_SWITCHES.map { it.uri } +
+                SPOOF_KEYS.map { Settings.Secure.getUriFor(it) })
+            .distinct()
+    }
+
+    // ---- the fake place and its spoofed values -------------------------------------------------
+
+    /** The spoofed values, or null when only the position is faked (or nothing is set). */
+    fun spoofProfile(context: Context): SpoofProfile? =
+        SpoofProfile.fromJson(Settings.Secure.getString(context.contentResolver, KEY_SPOOF_PROFILE))
+
+    /** Writes the spoofed values as one JSON string; null clears them (position only). */
+    fun setSpoofProfile(context: Context, profile: SpoofProfile?) {
+        Settings.Secure.putString(context.contentResolver, KEY_SPOOF_PROFILE, profile?.toJson())
+    }
+
+    /**
+     * Sets the fake place in one go: coordinates ("lat,lon"), the name shown for it, the
+     * spoofed values derived for it, and the switch on. The platform restarts the spoofed apps.
+     */
+    fun setFakePlace(context: Context, latLon: String, name: String, profile: SpoofProfile?) {
+        val cr = context.contentResolver
+        Settings.Secure.putString(cr, KEY_SPOOF_FAKE, latLon)
+        Settings.Secure.putString(cr, KEY_SPOOF_FAKE_NAME, name)
+        Settings.Secure.putString(cr, KEY_SPOOF_PROFILE, profile?.toJson())
+        Settings.Secure.putString(cr, KEY_SPOOF_ON, "1")
     }
 
     // ---- contacts ":picked" ------------------------------------------------------------------

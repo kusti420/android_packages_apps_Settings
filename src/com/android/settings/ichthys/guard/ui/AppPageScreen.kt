@@ -114,6 +114,14 @@ fun AppPageScreen(
             value = app?.let { a -> withContext(Dispatchers.IO) { repo.backend.isLanDenied(a.uid) } }
         }
     var confirmPreset by remember { mutableStateOf<AppPreset?>(null) }
+    // IchthysOS: the Full access preset asks twice (FullAccessConfirmation) and grants permissions.
+    var confirmFullAccess by remember { mutableStateOf(false) }
+    val fullAccessGrants =
+        remember(version, policy.preset) {
+            if (policy.preset == AppPreset.FULL_ACCESS)
+                com.android.settings.ichthys.guard.data.FullAccessGranter.recorded(repo.contextForLists(), packageName)?.count ?: 0
+            else 0
+        }
     fun update(change: (AppPolicy) -> AppPolicy) = repo.updatePolicy(packageName, change)
     fun changed() {
         version++
@@ -154,11 +162,20 @@ fun AppPageScreen(
         // ---- preset picker ----
         item {
             GuardCard(title = "Preset") {
+                // IchthysOS: Full access (every permission, nothing shielded) is offered here
+                // only, for user apps, behind two confirmations; the first-launch review keeps
+                // to PICKER.
+                val offered =
+                    if (app != null && !app.isSystem) AppPreset.PICKER + AppPreset.FULL_ACCESS
+                    else AppPreset.PICKER
                 Row(Modifier.horizontalScroll(rememberScrollState())) {
-                    for (p in AppPreset.PICKER) {
+                    for (p in offered) {
                         Chip(p.label, policy.preset == p) {
-                            if (p == AppPreset.CUSTOM) repo.applyPreset(packageName, AppPreset.CUSTOM)
-                            else confirmPreset = p
+                            when {
+                                p == AppPreset.CUSTOM -> repo.applyPreset(packageName, AppPreset.CUSTOM)
+                                p.requiresDoubleConfirmation -> if (policy.preset != p) confirmFullAccess = true
+                                else -> confirmPreset = p
+                            }
                         }
                     }
                 }
@@ -166,9 +183,18 @@ fun AppPageScreen(
                     policy.preset.summary +
                         if (differs.isNotEmpty()) " · ${quantity(differs.size, "control")} changed (marked)" else "",
                     style = MaterialTheme.typography.bodySmall,
-                    color = t.muted,
+                    color = if (policy.preset == AppPreset.FULL_ACCESS) t.danger else t.muted,
                     modifier = Modifier.padding(top = 6.dp),
                 )
+                if (policy.preset == AppPreset.FULL_ACCESS) {
+                    Text(
+                        if (fullAccessGrants > 0) "Guard granted ${quantity(fullAccessGrants, "permission")} for this; picking another preset takes them back."
+                        else "Every permission it asks for was granted already; nothing is shielded.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = t.muted,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                }
                 if (quarantined) {
                     Text(
                         // IchthysOS: during the review, Done releases it, not a preset.
@@ -281,8 +307,8 @@ fun AppPageScreen(
                     when (controls.location) {
                         LocationMode.REAL -> "Gets your real position, also while the fake place is on."
                         LocationMode.FAKE ->
-                            if (fakeOn) "Gets the fake place instead of your position; Wi-Fi, cell and Bluetooth scans come back empty."
-                            else "The fake place is off (Guard settings › Fake place), so this app gets your real position."
+                            if (fakeOn) "Gets the fake place instead of your position, with its country, carrier and time zone; Wi-Fi, cell and Bluetooth scans come back empty."
+                            else "The fake place is off (Guard settings › Spoofed values), so this app gets your real position."
                         LocationMode.NONE -> "Never gets a fix, as if indoors; scans find nothing."
                     }
                 )
@@ -356,8 +382,15 @@ fun AppPageScreen(
                             // IchthysOS: an asleep app is also suspended; lift that too, or it
                             // stays unopenable with a default policy.
                             val wasDormant = policy.dormant
+                            val wasFull = policy.preset == AppPreset.FULL_ACCESS
                             update { AppPolicy(packageName) }
-                            if (wasDormant) scope.launch(Dispatchers.IO) { repo.restoreDormant(packageName) }
+                            if (wasDormant || wasFull)
+                                scope.launch(Dispatchers.IO) {
+                                    if (wasDormant) repo.restoreDormant(packageName)
+                                    // IchthysOS: the defaults also mean the permissions Full
+                                    // access granted go back.
+                                    if (wasFull) repo.revokeFullAccess(packageName)
+                                }
                             changed()
                         }
                     ) {
@@ -386,15 +419,21 @@ fun AppPageScreen(
                 Text(
                     preset.summary +
                         ". Every control of this page is set at once; anything you changed before is replaced." +
-                        if (quarantined && !firstLaunchReview) " The app is released from quarantine." else ""
+                        (if (quarantined && !firstLaunchReview) " The app is released from quarantine." else "") +
+                        // IchthysOS: leaving Full access takes its permissions back.
+                        (if (policy.preset == AppPreset.FULL_ACCESS && fullAccessGrants > 0)
+                            " The ${quantity(fullAccessGrants, "permission")} Full access granted are taken back."
+                        else "")
                 )
             },
             confirmButton = {
                 TextButton(
                     onClick = {
                         confirmPreset = null
+                        val leavingFull = policy.preset == AppPreset.FULL_ACCESS
                         scope.launch(Dispatchers.IO) {
                             repo.applyPreset(packageName, preset)
+                            if (leavingFull) repo.revokeFullAccess(packageName)
                             if (quarantined && !firstLaunchReview) releaseQuarantine(repo, packageName)
                         }
                         changed()
@@ -404,6 +443,23 @@ fun AppPageScreen(
                 }
             },
             dismissButton = { TextButton(onClick = { confirmPreset = null }) { Text("Cancel", color = t.text) } },
+        )
+    }
+
+    // IchthysOS: Full access, after its two confirmations: the preset plus every permission.
+    if (confirmFullAccess) {
+        FullAccessConfirmation(
+            appLabel = app?.label ?: packageName,
+            packageName = packageName,
+            onConfirm = {
+                confirmFullAccess = false
+                scope.launch(Dispatchers.IO) {
+                    repo.applyPreset(packageName, AppPreset.FULL_ACCESS, grantPermissions = true)
+                    if (quarantined && !firstLaunchReview) releaseQuarantine(repo, packageName)
+                    withContext(Dispatchers.Main) { changed() }
+                }
+            },
+            onDismiss = { confirmFullAccess = false },
         )
     }
 }

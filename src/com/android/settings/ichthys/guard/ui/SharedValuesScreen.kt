@@ -50,6 +50,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
+import com.android.settings.ichthys.guard.model.SpoofProfile
+import com.android.settings.ichthys.guard.os.ShieldTable
 import com.android.settings.ichthys.guard.ui.theme.Guard
 import java.net.HttpURLConnection
 import java.net.URL
@@ -77,11 +79,17 @@ import org.json.JSONObject
  * Units: metric or imperial for the weather everywhere it shows.
  */
 @Composable
-fun SharedValuesScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
+fun SharedValuesScreen(
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+    /** Opens Guard's Spoofed values page (the values that go with the fake place); null = no link. */
+    onOpenSpoofed: (() -> Unit)? = null,
+) {
     val context = LocalContext.current
     val resolver = context.contentResolver
     val t = Guard.tokens
     val tick = rememberSettingsTick(SHARED_VALUE_URIS)
+    val profile = remember(tick) { ShieldTable.spoofProfile(context) }
     val home = remember(tick) { Settings.Secure.getString(resolver, KEY_HOME) }
     val homeName = remember(tick) { Settings.Secure.getString(resolver, KEY_HOME_NAME) }
     val active = remember(tick) { Settings.Secure.getString(resolver, KEY_ACTIVE) }
@@ -236,18 +244,30 @@ fun SharedValuesScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
                 Text(
                     "Installed apps get fixes at this place instead of your real position, and " +
                         "their Wi-Fi, cell and Bluetooth scans come back empty (each of them " +
-                        "would place the phone). System apps, emergency calls and the apps you " +
-                        "allow keep the real location. Play services / microG counts as an app: " +
-                        "allow it only if your maps app needs it.",
+                        "would place the phone). They also get the country, carrier, time zone " +
+                        "and language that go with the place (Guard › Spoofed values). System " +
+                        "apps, emergency calls and the apps you allow keep the real location. " +
+                        "Play services / microG counts as an app: allow it only if your maps " +
+                        "app needs it.",
                     style = MaterialTheme.typography.bodySmall,
                     color = t.muted,
                 )
                 if (searchFor == "fake") {
                     PlaceSearch(
                         onPick = { place ->
-                            putSecure(context, KEY_FAKE, place.latLon)
-                            putSecure(context, KEY_FAKE_NAME, place.name)
-                            putSecure(context, KEY_SPOOF_ON, "1")
+                            // The place and the values that go with it (country, carrier, time
+                            // zone, language, sales code), in one go. A country the search
+                            // didn't give keeps the old values.
+                            val next =
+                                if (place.countryCode.length == 2)
+                                    SpoofProfile.defaults(
+                                        place.countryCode,
+                                        place.timezone,
+                                        vpn = profile?.vpn ?: false,
+                                        followLanguage = profile?.locale != null || profile == null,
+                                    )
+                                else profile
+                            ShieldTable.setFakePlace(context, place.latLon, place.name, next)
                             searchFor = null
                         },
                         onCancel = { searchFor = null },
@@ -267,7 +287,25 @@ fun SharedValuesScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
                     ) { on ->
                         putSecure(context, KEY_SPOOF_ON, if (on) "1" else "0")
                     }
-                    TextButton(onClick = { searchFor = "fake" }) { Text("Change place") }
+                    // IchthysOS: the spoofed values that go with the place (Guard › Spoofed values).
+                    Text(
+                        profile?.summary(fakeName)
+                            ?: "Only the position is faked: apps still see your real country, carrier and time zone.",
+                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = t.mono),
+                        color = t.muted,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                    Row {
+                        TextButton(onClick = { searchFor = "fake" }) { Text("Change place") }
+                        TextButton(
+                            onClick = {
+                                if (onOpenSpoofed != null) onOpenSpoofed()
+                                else context.startActivity(GuardActivity.spoofedValuesIntent(context))
+                            }
+                        ) {
+                            Text(if (profile == null) "Set up the spoofed values" else "Spoofed values")
+                        }
+                    }
                 }
                 SectionLabel(
                     "Real location · ${realPkgs.size}",
@@ -430,7 +468,7 @@ private fun TripRow(trip: Trip, now: Long, onChange: (Trip) -> Unit, onDelete: (
 
 /** A city search (Open-Meteo, the weather's provider); [onPick] gets the chosen place. */
 @Composable
-private fun PlaceSearch(onPick: (Place) -> Unit, onCancel: () -> Unit) {
+internal fun PlaceSearch(onPick: (Place) -> Unit, onCancel: () -> Unit) {
     val t = Guard.tokens
     val scope = rememberCoroutineScope()
     var query by remember { mutableStateOf("") }
@@ -486,8 +524,20 @@ private fun PlaceSearch(onPick: (Place) -> Unit, onCancel: () -> Unit) {
     }
 }
 
-/** A search result: [name] as it is shown later, [detail] to tell same-named places apart. */
-private data class Place(val name: String, val detail: String, val latLon: String)
+/**
+ * A search result: [name] as it is shown later, [detail] to tell same-named places apart, and
+ * what the spoofed values are derived from: [countryCode] (ISO 3166-1 alpha-2, upper case),
+ * [timezone] (IANA), [countryName] and [admin1] (region) as Open-Meteo gave them ("" if not).
+ */
+internal data class Place(
+    val name: String,
+    val detail: String,
+    val latLon: String,
+    val countryCode: String = "",
+    val timezone: String = "",
+    val countryName: String = "",
+    val admin1: String = "",
+)
 
 /**
  * A trip as IchthysPlacesService reads it: under way from [start] until [end] (epoch ms, 0 =
@@ -540,7 +590,7 @@ private fun writeTrips(trips: List<Trip>): String {
 }
 
 /** Open-Meteo's geocoding (the weather's own provider); null when the request failed. */
-private fun searchPlaces(query: String): List<Place>? =
+internal fun searchPlaces(query: String): List<Place>? =
     try {
         val lang = Locale.getDefault().language.ifEmpty { "en" }
         val url =
@@ -571,6 +621,10 @@ private fun searchPlaces(query: String): List<Place>? =
                                 o.getDouble("latitude"),
                                 o.getDouble("longitude"),
                             ),
+                        countryCode = o.optString("country_code").uppercase(Locale.ROOT),
+                        timezone = o.optString("timezone"),
+                        countryName = o.optString("country"),
+                        admin1 = o.optString("admin1"),
                     )
                 }
             }
@@ -611,7 +665,7 @@ private fun formatWhen(context: Context, ms: Long): String =
     DateFormat.getMediumDateFormat(context).format(Date(ms)) + " " +
         DateFormat.getTimeFormat(context).format(Date(ms))
 
-private fun formatLatLon(value: String): String {
+internal fun formatLatLon(value: String): String {
     val parts = value.split(',')
     val lat = parts.getOrNull(0)?.toDoubleOrNull() ?: return value
     val lon = parts.getOrNull(1)?.toDoubleOrNull() ?: return value
@@ -646,6 +700,7 @@ private const val KEY_FAKE = "ichthys_location_fake"
 private const val KEY_FAKE_NAME = "ichthys_location_fake_name"
 private const val KEY_SPOOF_ON = "ichthys_location_spoof"
 private const val KEY_REAL_PKGS = "ichthys_location_real_pkgs"
+private const val KEY_PROFILE = ShieldTable.KEY_SPOOF_PROFILE
 private const val UNITS_METRIC = "metric"
 private const val UNITS_IMPERIAL = "imperial"
 
@@ -661,5 +716,6 @@ private val SHARED_VALUE_URIS =
             KEY_FAKE_NAME,
             KEY_SPOOF_ON,
             KEY_REAL_PKGS,
+            KEY_PROFILE,
         )
         .map { Settings.Secure.getUriFor(it) }

@@ -229,8 +229,9 @@ data class RuleBook(
      * IchthysOS: the rest of a setup, so a backup really restores everything: schedules, the
      * screen-off rule, alerts and sleep ([automation]); every per-app shield list and the storage
      * scopes as raw Settings values ([shieldLists], key → value); the master switches
-     * ([masters], key → 0/1); the fake place ([fakePlace]: ichthys_location_spoof, _fake,
-     * _fake_name). All optional, so older backups still import.
+     * ([masters], key → 0/1); the fake place and its spoofed values ([fakePlace]:
+     * ichthys_location_spoof, _fake, _fake_name, _profile). All optional, so older backups
+     * still import.
      */
     val automation: AutomationSettings? = null,
     val shieldLists: Map<String, String> = emptyMap(),

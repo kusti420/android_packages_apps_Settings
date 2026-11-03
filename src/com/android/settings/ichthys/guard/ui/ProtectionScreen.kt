@@ -98,6 +98,8 @@ fun ProtectionScreen(vm: GuardViewModel, nav: GuardNav, modifier: Modifier = Mod
     val lastLocation = remember(journal) { journal.entries.lastOrNull { it.shield?.isLocation == true } }
     val realList = remember(tick) { repo.realLocationApps().size }
     val fakeOn = remember(tick) { repo.fakePlaceOn() }
+    // IchthysOS: the spoofed values that go with the fake place (Gear › Spoofed values).
+    val spoofSummary = remember(tick) { repo.spoofProfile()?.summary(repo.fakePlaceName()) }
     val quarantined = remember(apps, journal) { repo.quarantinedApps() }
     val lastVerify = verify.last
     val paused = status.pausedUntil > now
@@ -227,12 +229,17 @@ fun ProtectionScreen(vm: GuardViewModel, nav: GuardNav, modifier: Modifier = Mod
                 ) { nav.openPage("shields") }
                 EngineCard(
                     title = "Location",
-                    state = if (fakeOn) "Fake place · ${quantity(realList, "app")} see the real one" else "Real for everyone",
+                    state =
+                        when {
+                            !fakeOn -> "Real for everyone"
+                            spoofSummary != null -> spoofSummary
+                            else -> "Fake place · ${quantity(realList, "app")} see the real one"
+                        },
                     evidence =
                         lastLocation?.let {
                             "Last fix ${formatWhen(it.timeMs, now)} · ${it.appLabel ?: "an app"} · ${it.shield?.label}"
                         } ?: "No fix delivered yet",
-                ) { nav.openPage("fakeplace") }
+                ) { nav.openPage("spoofed") }
                 EngineCard(
                     title = "Quarantine",
                     state = if (quarantined.isEmpty()) "No app waiting" else "${quantity(quarantined.size, "app")} waiting",

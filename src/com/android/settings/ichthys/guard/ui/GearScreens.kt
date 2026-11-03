@@ -29,13 +29,17 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -49,6 +53,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -56,18 +61,24 @@ import com.android.settings.ichthys.guard.backend.Health
 import com.android.settings.ichthys.guard.data.GuardRepository
 import com.android.settings.ichthys.guard.model.AlertType
 import com.android.settings.ichthys.guard.model.AppTag
+import com.android.settings.ichthys.guard.model.CountryProfiles
 import com.android.settings.ichthys.guard.model.HostRules
 import com.android.settings.ichthys.guard.model.JournalKind
 import com.android.settings.ichthys.guard.model.NetworkAccess
 import com.android.settings.ichthys.guard.model.Profile
 import com.android.settings.ichthys.guard.model.RuleAction
+import com.android.settings.ichthys.guard.model.SpoofProfile
 import com.android.settings.ichthys.guard.os.ShieldTable
 import com.android.settings.ichthys.guard.ui.theme.Guard
+import java.net.HttpURLConnection
+import java.net.URL
 import java.text.DateFormatSymbols
 import java.util.Calendar
+import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 
 /**
  * IchthysOS: the gear page: everything global, one row each, every row a page of its own. Every
@@ -85,6 +96,7 @@ fun GearScreen(vm: GuardViewModel, nav: GuardNav, modifier: Modifier = Modifier)
     val tick = rememberSettingsTick(ShieldTable.OBSERVED_URIS)
     val masters = remember(tick) { repo.masterShieldsOn() }
     val fakeOn = remember(tick) { repo.fakePlaceOn() }
+    val spoofSummary = remember(tick) { repo.spoofProfile()?.summary(repo.fakePlaceName()) }
     val realCount = remember(tick) { repo.realLocationApps().size }
     val quarantined = remember(apps) { repo.quarantinedApps().size }
     val asleep = remember(policies) { policies.policies.values.count { it.dormant } }
@@ -96,7 +108,12 @@ fun GearScreen(vm: GuardViewModel, nav: GuardNav, modifier: Modifier = Modifier)
             GuardCard {
                 NavRow("Master shields", "What every app gets of your data unless its page says otherwise", { nav.openPage("shields") }, trailing = "${masters.first} of ${masters.second} on")
                 NavRow("Shared values", "Home city, trips and units: weather, sunset and Night Light use them", { nav.openPage("shared") })
-                NavRow("Fake place", if (fakeOn) "On · ${quantity(realCount, "app")} see the real location" else "Off · every app gets the real location", { nav.openPage("fakeplace") })
+                NavRow(
+                    "Spoofed values",
+                    if (fakeOn) "${spoofSummary ?: "Position only"} · ${quantity(realCount, "app")} see the real location"
+                    else "Off · every app gets the real location",
+                    { nav.openPage("spoofed") },
+                )
                 NavRow("Screen-off rule", if (auto.screenOffAll) "On · ${quantity(auto.screenOffExempt.size, "app")} stay online" else "Off", { nav.openPage("screenoff") })
                 NavRow("Schedules", auto.activeProfiles().takeIf { it.isNotEmpty() }?.let { "Active now: " + it.joinToString { p -> p.name } } ?: "${quantity(auto.profiles.count { it.enabled }, "schedule")} on", { nav.openPage("schedules") })
                 NavRow("Lockdown keeps online", "Set on each app's page", { nav.openPage("lockdown") }, trailing = quantity(rules.lockdown.allowlist.size, "app"))
@@ -105,7 +122,7 @@ fun GearScreen(vm: GuardViewModel, nav: GuardNav, modifier: Modifier = Modifier)
                 NavRow("Alerts", "Camera, mic and location in the background, wake-ups, boot starts · kept in the journal", { nav.openPage("alerts") }, trailing = "${AlertType.entries.count { auto.alertOn(it) }} of ${AlertType.entries.size}")
                 NavRow("Put unused apps to sleep", if (auto.autoTighten) "On · after ${auto.autoTightenDays} days" + (if (asleep > 0) " · ${quantity(asleep, "app")} asleep" else "") else "Off", { nav.openPage("sleep") })
                 NavRow("Service health", if (status.problems.isEmpty()) "All parts working" else status.problems.first(), { nav.openPage("health") }, danger = status.problems.isNotEmpty())
-                NavRow("Backup", "Export or import presets, every shield list, the fake place, schedules and storage scopes", { nav.openPage("backup") })
+                NavRow("Backup", "Export or import presets, every shield list, the fake place and its spoofed values, schedules and storage scopes", { nav.openPage("backup") })
                 NavRow("Per-app tracker host rules — coming", if (hostRules > 0) "${quantity(hostRules, "saved rule")}, kept, not enforced yet" else "Saved rules are kept until the engine lands", { nav.openPage("trackers") })
             }
         }
@@ -117,7 +134,8 @@ fun GearScreen(vm: GuardViewModel, nav: GuardNav, modifier: Modifier = Modifier)
 fun GearSubPage(vm: GuardViewModel, nav: GuardNav, id: String, modifier: Modifier = Modifier) {
     when (id) {
         "shields" -> MasterShieldsPage(vm, nav, modifier)
-        "fakeplace" -> FakePlacePage(vm, nav, modifier)
+        // IchthysOS: "fakeplace" is the page's old id; older callers still land here.
+        "fakeplace", "spoofed" -> SpoofedValuesPage(vm, nav, modifier)
         "screenoff" -> ScreenOffPage(vm, nav, modifier)
         "schedules" -> SchedulesPage(vm, nav, modifier)
         "lockdown" -> LockdownKeepsPage(vm, nav, modifier)
@@ -175,42 +193,183 @@ private fun MasterShieldsPage(vm: GuardViewModel, nav: GuardNav, modifier: Modif
     }
 }
 
-// ---- Fake place -------------------------------------------------------------------------------
+// ---- Spoofed values (ex Fake place) -----------------------------------------------------------
 
+/**
+ * IchthysOS: the fake place and everything that goes with it. The place (Open-Meteo search)
+ * gives a country and a time zone; the country gives a carrier, a language and a Samsung sales
+ * code from [CountryProfiles]. Each derived row can be changed; every change rewrites the one
+ * profile JSON (ShieldTable.KEY_SPOOF_PROFILE) and the platform restarts the spoofed apps.
+ */
 @Composable
-private fun FakePlacePage(vm: GuardViewModel, nav: GuardNav, modifier: Modifier) {
+private fun SpoofedValuesPage(vm: GuardViewModel, nav: GuardNav, modifier: Modifier) {
     val repo = vm.repo
     val context = LocalContext.current
     val t = Guard.tokens
+    val scope = rememberCoroutineScope()
     val tick = rememberSettingsTick(ShieldTable.OBSERVED_URIS)
     var version by remember { mutableIntStateOf(0) }
     val on = remember(tick, version) { repo.fakePlaceOn() }
-    val name = remember(tick, version) { android.provider.Settings.Secure.getString(context.contentResolver, ShieldTable.KEY_SPOOF_FAKE_NAME) }
+    val fake = remember(tick, version) { android.provider.Settings.Secure.getString(context.contentResolver, ShieldTable.KEY_SPOOF_FAKE) }
+    val name = remember(tick, version) { repo.fakePlaceName() }
+    val profile = remember(tick, version) { repo.spoofProfile() }
     val real = remember(tick, version) { repo.realLocationApps() }
     val apps by repo.apps.collectAsStateWithLifecycle()
     val journal by repo.journal.collectAsStateWithLifecycle()
     val lastFake = remember(journal) { journal.entries.lastOrNull { it.shield == com.android.settings.ichthys.guard.model.ShieldProof.LOCATION_FAKE } }
+    var searching by remember { mutableStateOf(false) }
+    // Which editor is open: "country", "tz", "carrier", "custom", "locale", "sales" or null.
+    var editing by remember { mutableStateOf<String?>(null) }
+    var ipResult by remember { mutableStateOf<String?>(null) }
+    var ipMismatch by remember { mutableStateOf(false) }
+    var ipChecking by remember { mutableStateOf(false) }
+
+    fun save(next: SpoofProfile?) {
+        ShieldTable.setSpoofProfile(context, next)
+        ipResult = null
+        version++
+    }
+
     LazyColumn(modifier, contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        item { PageHeader("Fake place", nav.back) }
+        item {
+            PageHeader(
+                "Spoofed values",
+                nav.back,
+                "What apps get instead of your real place: the position, and the country, carrier, time zone and language that go with it. Apps set to Real on their page are the exception.",
+            )
+        }
         item {
             GuardCard {
                 ToggleRow(
                     "Fake place for every app",
                     on,
-                    if (on) "Apps get ${name ?: "the fake place"} instead of your position, and no Wi-Fi, cell or Bluetooth scans. Apps set to Real on their page are the exception."
-                    else "Off: every app gets your real position.",
+                    if (on) "Apps get ${name ?: "the fake place"} instead of your position, and no Wi-Fi, cell or Bluetooth scans." +
+                        (if (profile != null) " They also see ${profile.countryName} as their country." else "")
+                    else "Off: every app gets your real position, country and carrier.",
                 ) { v ->
                     com.android.settings.ichthys.guard.os.ShieldSwitch(ShieldTable.KEY_SPOOF_ON, com.android.settings.ichthys.guard.model.SettingsTable.SECURE).setOn(context.contentResolver, v)
                     version++
                 }
+                lastFake?.let {
+                    Text("Last fake fix delivered ${formatWhen(it.timeMs)} to ${it.appLabel ?: "an app"}", style = MaterialTheme.typography.bodySmall.copy(fontFamily = t.mono), color = t.muted)
+                }
+            }
+        }
+        item {
+            GuardCard(title = "Place") {
+                if (searching) {
+                    PlaceSearch(
+                        onPick = { place ->
+                            // The place and the values derived from its country, in one go. A
+                            // result without a country code keeps the values already set.
+                            val next =
+                                if (place.countryCode.length == 2)
+                                    SpoofProfile.defaults(
+                                        place.countryCode,
+                                        place.timezone,
+                                        vpn = profile?.vpn ?: false,
+                                        followLanguage = profile == null || profile.locale != null,
+                                    )
+                                else profile
+                            ShieldTable.setFakePlace(context, place.latLon, place.name, next)
+                            searching = false
+                            ipResult = null
+                            version++
+                        },
+                        onCancel = { searching = false },
+                    )
+                } else if (fake == null) {
+                    Text("No fake place set yet. Apps get your real position when allowed.", style = MaterialTheme.typography.bodyLarge)
+                    TextButton(onClick = { searching = true }) { Text("Choose a place") }
+                } else {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(name ?: formatLatLon(fake), style = MaterialTheme.typography.bodyLarge)
+                            Text(formatLatLon(fake), style = MaterialTheme.typography.bodySmall.copy(fontFamily = t.mono), color = t.muted)
+                        }
+                        TextButton(onClick = { searching = true }) { Text("Change place") }
+                    }
+                }
                 Text(
-                    "The place itself (and your home city and trips) is set in Settings › IchthysOS › Shared values.",
+                    "Picking a place fills in the rows below from its country. Your home city and trips are in Settings › IchthysOS › Shared values.",
                     style = MaterialTheme.typography.bodySmall,
                     color = t.muted,
                 )
-                TextButton(onClick = { context.startActivity(SharedValuesActivity.intent(context)) }) { Text("Open Shared values") }
-                lastFake?.let {
-                    Text("Last fake fix delivered ${formatWhen(it.timeMs)} to ${it.appLabel ?: "an app"}", style = MaterialTheme.typography.bodySmall.copy(fontFamily = t.mono), color = t.muted)
+            }
+        }
+        item {
+            GuardCard(title = "What apps see") {
+                if (profile == null) {
+                    Text(
+                        "Only the position is faked so far: apps still see your real country, carrier and time zone. Pick a country to fill in the rest.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = t.muted,
+                    )
+                    TextButton(onClick = { editing = "country" }) { Text("Choose the country") }
+                } else {
+                    NavRow("Country", "The SIM and network country apps are told", { editing = "country" }, trailing = "${profile.countryName} · ${profile.country}")
+                    NavRow("Time zone", "The clock zone apps see", { editing = "tz" }, trailing = profile.tz)
+                    NavRow("Carrier", "Network name and code apps see", { editing = "carrier" }, trailing = "${profile.operator} · ${profile.mcc} ${profile.mnc}")
+                    ToggleRow(
+                        "App language follows the place",
+                        profile.locale != null,
+                        if (profile.locale != null) "Spoofed apps run in ${languageName(profile.locale)} (${profile.locale})"
+                        else "Off: apps keep your own language. Apps can tell a tourist from a local by it.",
+                    ) { follow ->
+                        save(profile.copy(locale = if (follow) CountryProfiles.get(profile.country).locale else null))
+                    }
+                    if (profile.locale != null)
+                        NavRow("Language", "Change the language code", { editing = "locale" }, trailing = profile.locale)
+                    NavRow("Samsung sales code", if (profile.sales == null) "Not changed: apps read the phone's real region code" else "The firmware region code some apps read", { editing = "sales" }, trailing = profile.sales ?: "real")
+                    ToggleRow(
+                        "Spoofed apps need a VPN",
+                        profile.vpn,
+                        if (profile.vpn) "Without a VPN they are offline, so your internet address never gives the real place away."
+                        else "Off: they go online as usual, and your internet address still tells them where you really are.",
+                    ) { v -> save(profile.copy(vpn = v)) }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        TextButton(
+                            enabled = !ipChecking,
+                            onClick = {
+                                ipChecking = true
+                                ipResult = null
+                                scope.launch {
+                                    val check = try { withContext(Dispatchers.IO) { checkMyIp() } } finally { ipChecking = false }
+                                    if (check == null) {
+                                        ipResult = "Could not check. No connection, or the check is blocked."
+                                        ipMismatch = false
+                                    } else {
+                                        val match = check.matches(profile.country)
+                                        ipMismatch = !match
+                                        ipResult =
+                                            "${check.country}, ${check.city} (${check.ip})" +
+                                                (if (check.mullvad) " · via Mullvad" else "") +
+                                                (if (match) " · MATCH" else " · MISMATCH: apps on your connection see ${check.country}, not ${profile.countryName}")
+                                    }
+                                }
+                            },
+                        ) {
+                            Text(if (ipChecking) "Checking…" else "Check my IP")
+                        }
+                        Text("Where this phone's internet address is right now", style = MaterialTheme.typography.bodySmall, color = t.muted)
+                    }
+                    ipResult?.let {
+                        Text(it, style = MaterialTheme.typography.bodySmall.copy(fontFamily = t.mono), color = if (ipMismatch) t.danger else t.muted)
+                    }
+                    TextButton(onClick = { save(null) }) { Text("Fake the position only") }
+                }
+                Text(
+                    "Changing anything here restarts the spoofed apps, so they start with the new values.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = t.muted,
+                )
+            }
+        }
+        item {
+            GuardCard(title = "What each value does") {
+                for ((what, does) in SPOOF_VALUE_NOTES) {
+                    Text(what, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 6.dp))
+                    Text(does, style = MaterialTheme.typography.bodySmall, color = t.muted)
                 }
             }
         }
@@ -223,9 +382,239 @@ private fun FakePlacePage(vm: GuardViewModel, nav: GuardNav, modifier: Modifier)
                         TextButton(onClick = { repo.setLocationMode(pkg, com.android.settings.ichthys.guard.model.LocationMode.FAKE); version++ }) { Text("Remove") }
                     }
                 }
+                Text("These apps get your real position and real country, carrier and time zone too.", style = MaterialTheme.typography.bodySmall, color = t.muted)
             }
         }
     }
+
+    // ---- the editors ----
+    when (editing) {
+        "country" ->
+            PickerDialog(
+                title = "Country",
+                options = CountryProfiles.PICKER.map { (iso, label) -> iso to "$label ($iso)" },
+                selected = profile?.country,
+                onPick = { iso ->
+                    // A new country re-derives everything else; the VPN rule and the language
+                    // choice are kept.
+                    if (iso != profile?.country)
+                        save(SpoofProfile.defaults(iso, null, vpn = profile?.vpn ?: false, followLanguage = profile == null || profile.locale != null))
+                    editing = null
+                },
+                onDismiss = { editing = null },
+            )
+        "tz" ->
+            profile?.let { p ->
+                val zones = remember(p.country) { SpoofProfile.timeZonesOf(p.country).ifEmpty { listOf(p.tz) } }
+                PickerDialog(
+                    title = "Time zone",
+                    options = zones.map { it to it },
+                    selected = p.tz,
+                    onPick = { save(p.copy(tz = it)); editing = null },
+                    onDismiss = { editing = null },
+                )
+            }
+        "carrier" ->
+            profile?.let { p ->
+                val carriers = CountryProfiles.get(p.country).carriers
+                PickerDialog(
+                    title = "Carrier",
+                    options = carriers.map { it.plmn to "${it.name} · ${it.mcc} ${it.mnc}" } + ("custom" to "Custom…"),
+                    selected = carriers.firstOrNull { it.plmn == p.plmn && it.name == p.operator }?.plmn,
+                    onPick = { plmn ->
+                        if (plmn == "custom") editing = "custom"
+                        else {
+                            carriers.firstOrNull { it.plmn == plmn }?.let { save(p.copy(operator = it.name, mcc = it.mcc, mnc = it.mnc)) }
+                            editing = null
+                        }
+                    },
+                    onDismiss = { editing = null },
+                )
+            }
+        "custom" ->
+            profile?.let { p ->
+                CustomCarrierDialog(
+                    p,
+                    onSave = { name, mcc, mnc -> save(p.copy(operator = name, mcc = mcc, mnc = mnc)); editing = null },
+                    onDismiss = { editing = null },
+                )
+            }
+        "locale" ->
+            profile?.let { p ->
+                TextDialog(
+                    title = "App language",
+                    hint = "Language code, such as en-US or fr-FR",
+                    initial = p.locale ?: "",
+                    valid = { Locale.forLanguageTag(it).language.isNotEmpty() },
+                    onSave = { save(p.copy(locale = it.trim())); editing = null },
+                    onDismiss = { editing = null },
+                )
+            }
+        "sales" ->
+            profile?.let { p ->
+                TextDialog(
+                    title = "Samsung sales code",
+                    hint = "Three letters, such as XAA; empty keeps the phone's real one",
+                    initial = p.sales ?: "",
+                    valid = { it.isEmpty() || (it.length == 3 && it.all { c -> c.isLetterOrDigit() }) },
+                    onSave = { save(p.copy(sales = it.trim().uppercase(Locale.ROOT).ifEmpty { null })); editing = null },
+                    onDismiss = { editing = null },
+                )
+            }
+    }
+}
+
+/** What each spoofed value is used for, in plain words (the page's explanation card). */
+private val SPOOF_VALUE_NOTES =
+    listOf(
+        "Place" to "The position apps get from GPS and network location. Wi-Fi, cell and Bluetooth scans come back empty so they can't place you another way.",
+        "Country" to "What apps are told when they ask the phone which country the SIM and the network are in, and which country the phone has detected. Also the emergency numbers they are shown.",
+        "Carrier" to "The network name apps see, and its code (MCC and MNC, the numbers that identify a mobile network). Apps use it to tell which carrier and country you are on.",
+        "Time zone" to "The clock zone apps see, so the time of day and the zone name agree with the place. Apps also stop getting the phone's own time zone changes.",
+        "App language" to "The language spoofed apps run in. A phone in Estonian with a place in Texas stands out; following the place avoids that.",
+        "Samsung sales code" to "The region code of the phone's firmware (ro.boot.sales_code) some apps read to tell where the phone was sold.",
+        "VPN" to "Your internet address places you too. With this on, spoofed apps are offline until a VPN is up, and they can't see the Wi-Fi's own DNS and addresses either. Check my IP shows what they would see.",
+    )
+
+/** The English name of a language tag ("en-US" → "English (United States)"). */
+private fun languageName(tag: String): String =
+    Locale.forLanguageTag(tag).getDisplayName(Locale.ENGLISH).ifEmpty { tag }
+
+/** What https://am.i.mullvad.net/json says about this phone's connection. */
+private data class IpCheck(val ip: String, val country: String, val city: String, val mullvad: Boolean) {
+    /** True when the reported country is [iso] (by its English name, or the code). */
+    fun matches(iso: String): Boolean {
+        if (country.equals(iso, true)) return true
+        val want = Locale("", iso).getDisplayCountry(Locale.ENGLISH)
+        if (country.equals(want, true)) return true
+        // The names Mullvad uses are the usual English ones; find the code they stand for.
+        val code = Locale.getISOCountries().firstOrNull { Locale("", it).getDisplayCountry(Locale.ENGLISH).equals(country, true) }
+        return code != null && code.equals(iso, true)
+    }
+}
+
+/** GETs the Mullvad connection check (10 s timeouts); null when it failed or the phone is offline. */
+private fun checkMyIp(): IpCheck? =
+    try {
+        val conn = URL("https://am.i.mullvad.net/json").openConnection() as HttpURLConnection
+        conn.connectTimeout = 10_000
+        conn.readTimeout = 10_000
+        conn.setRequestProperty("Accept", "application/json")
+        try {
+            if (conn.responseCode != 200) null
+            else {
+                val o = JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
+                IpCheck(
+                    ip = o.optString("ip"),
+                    country = o.optString("country"),
+                    city = o.optString("city"),
+                    mullvad = o.optBoolean("mullvad_exit_ip", false),
+                )
+            }
+        } finally {
+            conn.disconnect()
+        }
+    } catch (e: Exception) {
+        null
+    }
+
+/** A list to pick one value from, with a filter box; [options] are (value, label). */
+@Composable
+private fun PickerDialog(
+    title: String,
+    options: List<Pair<String, String>>,
+    selected: String?,
+    onPick: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val t = Guard.tokens
+    var filter by remember { mutableStateOf("") }
+    val shown = remember(filter, options) {
+        val q = filter.trim()
+        if (q.isEmpty()) options else options.filter { it.second.contains(q, ignoreCase = true) || it.first.contains(q, ignoreCase = true) }
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column {
+                if (options.size > 8)
+                    OutlinedTextField(
+                        value = filter,
+                        onValueChange = { filter = it },
+                        label = { Text("Filter") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                    )
+                LazyColumn(Modifier.heightIn(max = 360.dp)) {
+                    items(shown.size) { i ->
+                        val (value, label) = shown[i]
+                        Text(
+                            label,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (value == selected) t.accent else t.text,
+                            modifier = Modifier.fillMaxWidth().clickable { onPick(value) }.padding(vertical = 10.dp),
+                        )
+                    }
+                }
+                if (shown.isEmpty()) Text("Nothing matches.", style = MaterialTheme.typography.bodySmall, color = t.muted)
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+/** One text value with a validity rule; Save stays off until [valid]. */
+@Composable
+private fun TextDialog(
+    title: String,
+    hint: String,
+    initial: String,
+    valid: (String) -> Boolean,
+    onSave: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val t = Guard.tokens
+    var value by remember { mutableStateOf(initial) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column {
+                OutlinedTextField(value = value, onValueChange = { value = it }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                Text(hint, style = MaterialTheme.typography.bodySmall, color = t.muted, modifier = Modifier.padding(top = 6.dp))
+            }
+        },
+        confirmButton = { TextButton(enabled = valid(value.trim()), onClick = { onSave(value) }) { Text("Save") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+/** A carrier of your own: name, MCC (3 digits) and MNC (2 or 3 digits). */
+@Composable
+private fun CustomCarrierDialog(p: SpoofProfile, onSave: (String, String, String) -> Unit, onDismiss: () -> Unit) {
+    val t = Guard.tokens
+    var name by remember { mutableStateOf(p.operator) }
+    var mcc by remember { mutableStateOf(p.mcc) }
+    var mnc by remember { mutableStateOf(p.mnc) }
+    val ok = name.isNotBlank() && SpoofProfile.validPlmn(mcc.trim(), mnc.trim())
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Custom carrier") },
+        text = {
+            Column {
+                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Network name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(value = mcc, onValueChange = { mcc = it.filter { c -> c.isDigit() }.take(3) }, label = { Text("MCC") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f))
+                    OutlinedTextField(value = mnc, onValueChange = { mnc = it.filter { c -> c.isDigit() }.take(3) }, label = { Text("MNC") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f))
+                }
+                Text("MCC is the country's 3-digit network code, MNC the carrier's 2 or 3 digits (T-Mobile US is 310 260).", style = MaterialTheme.typography.bodySmall, color = t.muted, modifier = Modifier.padding(top = 6.dp))
+            }
+        },
+        confirmButton = { TextButton(enabled = ok, onClick = { onSave(name.trim(), mcc.trim(), mnc.trim()) }) { Text("Save") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
 
 // ---- Screen-off rule --------------------------------------------------------------------------
@@ -579,7 +968,7 @@ private fun BackupPage(vm: GuardViewModel, nav: GuardNav, modifier: Modifier) {
                         try {
                             val text = withContext(Dispatchers.IO) { context.contentResolver.openInputStream(uri)!!.use { it.readBytes().toString(Charsets.UTF_8) } }
                             val n = withContext(Dispatchers.Default) { repo.importJson(text) }
-                            "Backup imported: every app's preset and setup, the shield lists, the fake place, schedules" + (if (n > 0) " and ${quantity(n, "host rule")}" else "")
+                            "Backup imported: every app's preset and setup, the shield lists, the fake place and its spoofed values, schedules" + (if (n > 0) " and ${quantity(n, "host rule")}" else "")
                         } catch (e: IllegalArgumentException) {
                             e.message ?: "Not a Guard backup"
                         } catch (e: Exception) {
@@ -592,7 +981,7 @@ private fun BackupPage(vm: GuardViewModel, nav: GuardNav, modifier: Modifier) {
         item {
             GuardCard {
                 Text(
-                    "Export saves every app's preset and controls, lockdown and its list, schedules, the screen-off rule, alerts, sleep, EVERY shield list (contacts, calendar, call log, texts, clipboard, sensors, usage, radios, location, scans, NFC), the storage scopes, the master shields and the fake place as one JSON file. Import replaces the setup with it.",
+                    "Export saves every app's preset and controls, lockdown and its list, schedules, the screen-off rule, alerts, sleep, EVERY shield list (contacts, calendar, call log, texts, clipboard, sensors, usage, radios, location, scans, NFC), the storage scopes, the master shields, the fake place and its spoofed values (country, carrier, time zone, language, VPN rule) as one JSON file. Import replaces the setup with it.",
                     style = MaterialTheme.typography.bodySmall,
                     color = t.muted,
                 )

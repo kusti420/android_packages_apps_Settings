@@ -46,7 +46,7 @@ import com.android.settings.ichthys.guard.ui.theme.GuardTheme
  * IchthysOS: Shared values (home city, trips, units, the fake place's coordinates) as its own
  * page under Settings › IchthysOS, out of Guard. The screen itself is unchanged
  * ([SharedValuesScreen]); only the entry moved: the hub lists it, the Weather page's Location row
- * opens it, and Guard's gear links here from "Fake place".
+ * opens it, and Guard's gear links here from "Spoofed values" (which this page links back to).
  */
 class SharedValuesActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -60,7 +60,11 @@ class SharedValuesActivity : ComponentActivity() {
                     contentColor = t.text,
                     topBar = { TopBar(stringResource(R.string.ichthys_shared_values_title)) { finish() } },
                 ) { padding ->
-                    SharedValuesScreen(onBack = { finish() }, modifier = Modifier.padding(padding))
+                    SharedValuesScreen(
+                        onBack = { finish() },
+                        modifier = Modifier.padding(padding),
+                        onOpenSpoofed = { startActivity(GuardActivity.spoofedValuesIntent(this)) },
+                    )
                 }
             }
         }

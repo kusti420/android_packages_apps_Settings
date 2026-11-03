@@ -48,6 +48,7 @@ import com.android.settings.ichthys.guard.backend.UidRule
 import com.android.settings.ichthys.guard.model.AppControls
 import com.android.settings.ichthys.guard.model.AppPolicy
 import com.android.settings.ichthys.guard.model.AppPreset
+import com.android.settings.ichthys.guard.model.TrackerBlockLevel
 import com.android.settings.ichthys.guard.model.AutomationSettings
 import com.android.settings.ichthys.guard.model.BlockReason
 import com.android.settings.ichthys.guard.model.CustomRule
@@ -60,6 +61,7 @@ import com.android.settings.ichthys.guard.model.LocationMode
 import com.android.settings.ichthys.guard.model.PresetControl
 import com.android.settings.ichthys.guard.model.ScanMode
 import com.android.settings.ichthys.guard.model.ScreenOffMode
+import com.android.settings.ichthys.guard.model.SpoofProfile
 import com.android.settings.ichthys.guard.model.VerifyHistory
 import com.android.settings.ichthys.guard.model.VerifyRun
 import com.android.settings.ichthys.guard.os.ShieldTable
@@ -1161,12 +1163,7 @@ class GuardRepository(
         val masters = HashMap<String, Int>()
         for (sw in ShieldTable.MASTER_SWITCHES) masters[sw.key] = if (sw.isOn(cr)) 1 else 0
         val fake = HashMap<String, String>()
-        for (key in
-            listOf(
-                ShieldTable.KEY_SPOOF_ON,
-                ShieldTable.KEY_SPOOF_FAKE,
-                ShieldTable.KEY_SPOOF_FAKE_NAME,
-            )) {
+        for (key in ShieldTable.SPOOF_KEYS) {
             Settings.Secure.getString(cr, key)?.let { fake[key] = it }
         }
         return _rules.value
@@ -1213,12 +1210,7 @@ class GuardRepository(
                 ShieldTable.MASTER_SWITCHES.firstOrNull { it.key == key }?.setOn(cr, on != 0)
             }
             for ((key, value) in imported.fakePlace) {
-                if (
-                    key == ShieldTable.KEY_SPOOF_ON ||
-                        key == ShieldTable.KEY_SPOOF_FAKE ||
-                        key == ShieldTable.KEY_SPOOF_FAKE_NAME
-                )
-                    Settings.Secure.putString(cr, key, value)
+                if (key in ShieldTable.SPOOF_KEYS) Settings.Secure.putString(cr, key, value)
             }
         } catch (e: SecurityException) {
             Log.w(TAG, "no WRITE_SECURE_SETTINGS; shield lists not imported", e)
@@ -1295,9 +1287,22 @@ class GuardRepository(
     fun setScanMode(pkg: String, mode: ScanMode) =
         IchthysProtect.setListed(context, ShieldTable.KEY_SCAN_EMPTY, pkg, mode == ScanMode.EMPTY)
 
-    /** True when the fake place is on for everyone not on the real list (Gear › Fake place). */
+    /** True when the fake place is on for everyone not on the real list (Gear › Spoofed values). */
     fun fakePlaceOn(): Boolean =
         Settings.Secure.getString(context.contentResolver, ShieldTable.KEY_SPOOF_ON) != "0"
+
+    /** The spoofed values that go with the fake place, or null when only the position is faked. */
+    fun spoofProfile(): SpoofProfile? = ShieldTable.spoofProfile(context)
+
+    /** The fake place's name as shown ("Los Angeles"), or null when no place is set. */
+    fun fakePlaceName(): String? =
+        Settings.Secure.getString(context.contentResolver, ShieldTable.KEY_SPOOF_FAKE_NAME)
+
+    /**
+     * True when [pkg] gets the spoofed values: the fake place is on and the app isn't on the
+     * real-location list (the platform's rule in IchthysLocationSpoof, for user apps).
+     */
+    fun isSpoofed(pkg: String): Boolean = fakePlaceOn() && pkg !in realLocationApps()
 
     /** The effective state of every control of [pkg], for the preset comparison. */
     fun appControls(pkg: String): AppControls {
@@ -1310,6 +1315,17 @@ class GuardRepository(
                         s.id != "sensors" &&
                         s.id != "location_real" &&
                         !s.isProtected(context, pkg)
+                }
+                .map { it.label }
+        // IchthysOS: the allow lists the app is not on; only Full access counts them as changes.
+        val otherShielded =
+            ShieldTable.SHIELDS
+                .filter { s ->
+                    s.listedMeansReal &&
+                        s.id != "contacts" &&
+                        s.id != "sensors" &&
+                        s.id != "location_real" &&
+                        s.isProtected(context, pkg)
                 }
                 .map { it.label }
         return AppControls(
@@ -1325,6 +1341,7 @@ class GuardRepository(
             nfcBlocked = IchthysProtect.isListed(context, ShieldTable.KEY_NFC_BLOCKED, pkg),
             lockdownKeep = pkg in _rules.value.lockdown.allowlist,
             otherAllowed = otherAllowed,
+            otherShielded = otherShielded,
         )
     }
 
@@ -1340,40 +1357,54 @@ class GuardRepository(
      * scans, contacts, sensors, NFC, lockdown allowlist; every other allow list cleared, so
      * "everything else shielded" holds). Then one push to the service and one journal entry.
      * [AppPreset.CUSTOM] only records the choice; nothing else changes.
+     *
+     * IchthysOS: [AppPreset.FULL_ACCESS] turns every allow list on instead ("nothing shielded")
+     * and, with [grantPermissions] (the app page after its two confirmations, never a verify run
+     * or a restore), also grants every permission the app asks for (FullAccessGranter). The
+     * permissions are Android's, not a list of Guard's: a later preset leaves them alone unless
+     * the caller also calls [revokeFullAccess]. Binder work; call off the main thread.
      */
-    fun applyPreset(pkg: String, preset: AppPreset) {
+    fun applyPreset(pkg: String, preset: AppPreset, grantPermissions: Boolean = false) {
         val spec = preset.spec
         if (spec == null) {
             updatePolicy(pkg) { it.copy(preset = AppPreset.CUSTOM) }
             journal(JournalKind.PRESET, "Custom", pkg)
             return
         }
-        synchronized(policyLock) {
-            // Every allow list the preset doesn't grant: off. ":picked" entries too (set below).
-            for (key in ShieldTable.ALLOW_LIST_KEYS) {
-                if (key == ShieldTable.KEY_SENSORS || key == ShieldTable.KEY_CONTACTS) continue
-                if (key == ShieldTable.KEY_LOCATION_REAL) continue
-                IchthysProtect.setListed(context, key, pkg, false)
-            }
-            ShieldTable.setContactsPicked(context, pkg, spec.contactsPicked)
-            setLocationMode(pkg, spec.location)
-            setScanMode(pkg, spec.scans)
-            IchthysProtect.setListed(context, ShieldTable.KEY_NFC_BLOCKED, pkg, spec.nfcBlocked)
-        }
-        // The policy (mirrors contacts, clipboard and sensors into their lists itself).
+        val full = spec.fullAccess
+        // The policy first (it mirrors contacts, clipboard and sensors into their lists itself):
+        // when contactsAllowed flips off, OsSettingsBridge.setListed drops every "pkg:*" entry
+        // of the contacts list, so the ":picked" entry must be written after it, not before.
         val wasDormant = _policies.value.policyFor(pkg).dormant
         updatePolicy(pkg) {
             it.copy(
                 network = spec.network,
-                contactsAllowed = false,
-                clipboardAllowed = false,
+                trackerBlock = if (full) TrackerBlockLevel.OFF else it.trackerBlock,
+                contactsAllowed = full,
+                clipboardAllowed = full,
                 sensorsExempt = spec.sensorsReal,
                 screenOffBlock = spec.screenOff == ScreenOffMode.OFFLINE,
                 backgroundNetworkOff = spec.backgroundOff,
                 localNetwork = spec.lan,
                 dormant = false,
+                keepActive = if (full) true else it.keepActive,
                 preset = preset,
             )
+        }
+        synchronized(policyLock) {
+            // Every allow list the preset doesn't grant: off (Full access: on).
+            for (key in ShieldTable.ALLOW_LIST_KEYS) {
+                if (key == ShieldTable.KEY_SENSORS || key == ShieldTable.KEY_CONTACTS) continue
+                if (key == ShieldTable.KEY_LOCATION_REAL) continue
+                IchthysProtect.setListed(context, key, pkg, full)
+            }
+            ShieldTable.setContactsPicked(context, pkg, spec.contactsPicked)
+            // setContactsPicked drops the bare entry; Full access wants it (real contacts).
+            if (full) IchthysProtect.setListed(context, ShieldTable.KEY_CONTACTS, pkg, true)
+            setLocationMode(pkg, spec.location)
+            setScanMode(pkg, spec.scans)
+            IchthysProtect.setListed(context, ShieldTable.KEY_NFC_BLOCKED, pkg, spec.nfcBlocked)
+            if (full) ShieldTable.setStorageScope(context, pkg, null)
         }
         if (wasDormant) restoreDormant(pkg)
         val exempt = spec.screenOff == ScreenOffMode.STAY_ONLINE
@@ -1389,7 +1420,49 @@ class GuardRepository(
             setLockdownAllowed(pkg, spec.lockdownKeep)
         syncOsListsFromSettings()
         journal(JournalKind.PRESET, preset.label, pkg)
+        if (full && grantPermissions) {
+            val n = FullAccessGranter.grantAll(context, pkg)
+            journal(JournalKind.PRESET, "Full access: ${quantityOf(n, "permission")} granted", pkg)
+        }
     }
+
+    /**
+     * IchthysOS: takes back every permission and special access the Full access preset granted
+     * [pkg] (and only those; what the user granted by hand stays). Called by the app page when
+     * the user leaves Full access or resets the app, and by the verify page's toggle. Off the
+     * main thread.
+     */
+    fun revokeFullAccess(pkg: String) {
+        val n = FullAccessGranter.revokeAll(context, pkg)
+        if (n > 0) journal(JournalKind.PRESET, "Full access ended: ${quantityOf(n, "permission")} taken back", pkg)
+    }
+
+    /**
+     * IchthysOS: back to the Shielded defaults every app starts with: the default policy, no
+     * allow list, no protect list, no storage scope, not asleep, no screen-off or lockdown
+     * exception. What the verify page's Full access toggle does when switched off (together
+     * with [revokeFullAccess]). Off the main thread.
+     */
+    fun resetToShielded(pkg: String) {
+        synchronized(policyLock) {
+            for (key in ShieldTable.ALL_LIST_KEYS) {
+                if (key == ShieldTable.KEY_STORAGE_SCOPES || key == ShieldTable.KEY_A11Y_SCOPES) continue
+                IchthysProtect.setListed(context, key, pkg, false)
+            }
+            ShieldTable.setContactsPicked(context, pkg, false)
+            ShieldTable.setStorageScope(context, pkg, null)
+        }
+        val wasDormant = _policies.value.policyFor(pkg).dormant
+        updatePolicy(pkg) { AppPolicy(pkg) }
+        if (wasDormant) restoreDormant(pkg)
+        if (pkg in _automation.value.screenOffExempt)
+            updateAutomation { it.copy(screenOffExempt = it.screenOffExempt - pkg) }
+        if (pkg in _rules.value.lockdown.allowlist) setLockdownAllowed(pkg, false)
+        syncOsListsFromSettings()
+        journal(JournalKind.PRESET, "Shielded defaults", pkg)
+    }
+
+    private fun quantityOf(n: Int, one: String): String = "$n ${if (n == 1) one else one + "s"}"
 
     /** Apps held in Guard's first-launch quarantine (suspended by Settings, not yet released). */
     fun quarantinedApps(): List<AppInfo> {

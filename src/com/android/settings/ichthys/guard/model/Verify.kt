@@ -31,6 +31,8 @@ import kotlinx.serialization.json.Json
 enum class VerifyCategory(val label: String) {
     FIREWALL("Firewall"),
     LOCATION("Location"),
+    /** IchthysOS: the spoofed values (country, carrier, time zone, language, IP) of the probes "spoof.*". */
+    SPOOF("Spoofed values"),
     SHIELDS("Shields"),
     LAN("Local network & hosts"),
     SERVICE("Service health"),

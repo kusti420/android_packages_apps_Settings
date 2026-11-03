@@ -149,6 +149,8 @@ open class GuardActivity : ComponentActivity() {
                         OPEN_PAGE_GEAR -> stack = PAGE_GEAR
                         // IchthysOS: quiet notifications (a gear sub-page).
                         OPEN_PAGE_QUIET_NOTIFICATIONS -> stack = PAGE_QUIET_NOTIFICATIONS
+                        // IchthysOS: the spoofed values (a gear sub-page; Shared values links here).
+                        OPEN_PAGE_SPOOFED -> stack = PAGE_SPOOFED
                     }
                     openPage.value = null
                 }
@@ -255,7 +257,8 @@ open class GuardActivity : ComponentActivity() {
                             QuietNotificationsScreen(vm, onBack = pop, modifier = m)
                         // IchthysOS (owner): Shared values live in Guard (home city, trips,
                         // fake place, units); Settings › IchthysOS and Weather link here too.
-                        top == PAGE_SHARED_VALUES -> SharedValuesScreen(onBack = pop, modifier = m)
+                        top == PAGE_SHARED_VALUES ->
+                            SharedValuesScreen(onBack = pop, modifier = m, onOpenSpoofed = { push(PAGE_SPOOFED) })
                         top.startsWith("s:") -> GearSubPage(vm, nav, top.removePrefix("s:"), m)
                         top.startsWith("h:") ->
                             DestinationScreen(
@@ -390,6 +393,8 @@ open class GuardActivity : ComponentActivity() {
         /** IchthysOS: QuietNotificationsScreen; nav.openPage("quiet") lands here. */
         private const val PAGE_QUIET_NOTIFICATIONS = "s:quiet"
         private const val PAGE_SHARED_VALUES = "s:shared"
+        /** IchthysOS: the Spoofed values gear sub-page (GearSubPage "spoofed"). */
+        private const val PAGE_SPOOFED = "s:spoofed"
 
         /** IchthysOS: which page to open on top of the tabs. */
         const val EXTRA_OPEN_PAGE = "com.android.settings.ichthys.guard.extra.OPEN_PAGE"
@@ -397,6 +402,13 @@ open class GuardActivity : ComponentActivity() {
         const val OPEN_PAGE_GEAR = "gear"
         /** IchthysOS: [EXTRA_OPEN_PAGE] value for the quiet-notification controls. */
         const val OPEN_PAGE_QUIET_NOTIFICATIONS = "quiet_notifications"
+        /** IchthysOS: [EXTRA_OPEN_PAGE] value for the spoofed values (gear › Spoofed values). */
+        const val OPEN_PAGE_SPOOFED = "spoofed"
+
+        /** IchthysOS: opens Guard at the spoofed values (the Shared values page links here). */
+        @JvmStatic
+        fun spoofedValuesIntent(context: Context): Intent =
+            Intent(context, GuardActivity::class.java).putExtra(EXTRA_OPEN_PAGE, OPEN_PAGE_SPOOFED)
 
         /** IchthysOS: opens Guard at the quiet-notification controls (gear > Notifications). */
         @JvmStatic

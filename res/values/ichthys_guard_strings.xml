@@ -28,6 +28,10 @@
          Settings › IchthysOS since the Guard redesign (SharedValuesActivity). -->
     <string name="ichthys_shared_values_title">Shared values</string>
     <string name="ichthys_shared_values_summary">Home city, trips, units and the fake place, used by weather, sun times and Guard</string>
+    <!-- IchthysOS: Guard › Spoofed values (the country, carrier, time zone, language and IP
+         rule that go with the fake place; GearScreens SpoofedValuesPage). -->
+    <string name="ichthys_spoofed_values_title">Spoofed values</string>
+    <string name="ichthys_spoofed_values_summary">What apps get instead of your real place, country, carrier and time zone</string>
 
     <!-- The Guard row on the stock App info page: opens that app's Guard page. -->
     <string name="ichthys_guard_app_info_summary">Preset, network, location and data shields</string>

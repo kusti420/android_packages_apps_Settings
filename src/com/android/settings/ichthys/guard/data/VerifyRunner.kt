@@ -23,6 +23,8 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.Bundle
 import android.os.SystemClock
@@ -42,6 +44,7 @@ import com.android.settings.ichthys.guard.model.NetworkAccess
 import com.android.settings.ichthys.guard.model.PolicySet
 import com.android.settings.ichthys.guard.model.ScanMode
 import com.android.settings.ichthys.guard.model.ScreenOffMode
+import com.android.settings.ichthys.guard.model.SpoofChecks
 import com.android.settings.ichthys.guard.model.VerifyCategory
 import com.android.settings.ichthys.guard.model.VerifyPhase
 import com.android.settings.ichthys.guard.model.VerifyRun
@@ -238,6 +241,32 @@ class VerifyRunner private constructor(private val context: Context) {
             ShieldTable.SHIELDS.filter { it.isProtected(context, pkg) }.map { it.id }
         intent.putExtra(EXTRA_EXPECT_SHIELDS, protecting.joinToString(","))
         intent.putExtra(EXTRA_EXPECT_SCREEN_OFF, repo.screenOffMode(pkg).name.lowercase())
+        // IchthysOS: the spoofed values (Gear › Spoofed values). The probe reports raw values and
+        // Guard compares them itself (SpoofChecks); the extras let the probe show them too.
+        val spoof = spoofExpectation(pkg)
+        intent.putExtra(EXTRA_EXPECT_SPOOFED, if (spoof.spoofed) "yes" else "no")
+        intent.putExtra(EXTRA_EXPECT_PROFILE, spoof.profile?.takeIf { spoof.spoofed }?.toJson() ?: "")
+        intent.putExtra(EXTRA_EXPECT_IP, if (spoof.ipBlocked) "blocked" else "allowed")
+    }
+
+    /** What the probe should get of the spoofed values right now. */
+    private fun spoofExpectation(pkg: String): SpoofChecks.Expectation =
+        SpoofChecks.Expectation(
+            spoofed = repo.isSpoofed(pkg),
+            profile = repo.spoofProfile(),
+            vpnUp = vpnUp(),
+        )
+
+    /** True when any network with the VPN transport is up (the "fake IP" rule needs one). */
+    private fun vpnUp(): Boolean {
+        val cm = context.getSystemService(ConnectivityManager::class.java) ?: return false
+        return try {
+            cm.allNetworks.any { n ->
+                cm.getNetworkCapabilities(n)?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true
+            }
+        } catch (e: RuntimeException) {
+            false
+        }
     }
 
     /** Row counts as Settings sees them (every shield exempts the system), so 0 rows is proof. */
@@ -343,11 +372,22 @@ class VerifyRunner private constructor(private val context: Context) {
             } catch (e: org.json.JSONException) {
                 JSONArray()
             }
+        // IchthysOS: the spoof.* probes report raw values; Guard judges them against the profile.
+        val spoof by lazy { spoofExpectation(PROBE_PACKAGE) }
         for (i in 0 until probes.length()) {
             val p = probes.optJSONObject(i) ?: continue
             val id = p.optString("id")
-            val verdict = p.optString("verdict", "info")
-            val why = p.optString("why", "")
+            var verdict = p.optString("verdict", "info")
+            var why = p.optString("why", "")
+            if (SpoofChecks.isSpoofProbe(id)) {
+                val detail = p.optJSONObject("detail")
+                val values = LinkedHashMap<String, String>()
+                if (detail != null) for (k in detail.keys()) values[k] = detail.optString(k)
+                SpoofChecks.judge(id, values, spoof)?.let {
+                    verdict = it.verdict
+                    why = it.why
+                }
+            }
             val cat = categoryOf(id, p.optString("category", ""))
             add(cat, verdict, if (verdict == "fail") "$id: $why" else null)
         }
@@ -364,6 +404,7 @@ class VerifyRunner private constructor(private val context: Context) {
         when {
             id.startsWith("net.lan") || id.startsWith("net.dns_trackers") -> VerifyCategory.LAN
             id.startsWith("net.") -> VerifyCategory.FIREWALL
+            id.startsWith("spoof.") -> VerifyCategory.SPOOF
             id.startsWith("location.") || id == "bt.le_scan" || id == "bt.discovery" ||
                 id == "wifi.scan_results" || id == "wifi.connection" || id == "phone.cell_info" ->
                 VerifyCategory.LOCATION
@@ -525,6 +566,12 @@ class VerifyRunner private constructor(private val context: Context) {
         const val EXTRA_EXPECT_LAN = "expect_lan"
         const val EXTRA_EXPECT_SHIELDS = "expect_shields"
         const val EXTRA_EXPECT_SCREEN_OFF = "expect_screen_off"
+        /** IchthysOS: "yes" when the probe gets the spoofed values (fake place on, not on the real list). */
+        const val EXTRA_EXPECT_SPOOFED = "expect_spoofed"
+        /** IchthysOS: the profile JSON the platform hands the probe ("" when none / not spoofed). */
+        const val EXTRA_EXPECT_PROFILE = "expect_profile"
+        /** IchthysOS: "blocked" when the profile says vpn=true and no VPN is up, else "allowed". */
+        const val EXTRA_EXPECT_IP = "expect_ip"
         // ---- the probe's reply ----
         const val EXTRA_PROBES = "probes"
         const val EXTRA_IN_SYSTEM = "in_system"
