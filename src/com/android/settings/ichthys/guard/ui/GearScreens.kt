@@ -209,10 +209,18 @@ private fun SpoofedValuesPage(vm: GuardViewModel, nav: GuardNav, modifier: Modif
     val scope = rememberCoroutineScope()
     val tick = rememberSettingsTick(ShieldTable.OBSERVED_URIS)
     var version by remember { mutableIntStateOf(0) }
-    val on = remember(tick, version) { repo.fakePlaceOn() }
-    val fake = remember(tick, version) { android.provider.Settings.Secure.getString(context.contentResolver, ShieldTable.KEY_SPOOF_FAKE) }
-    val name = remember(tick, version) { repo.fakePlaceName() }
-    val profile = remember(tick, version) { repo.spoofProfile() }
+    // IchthysOS: the page edits a draft and writes it to Settings once, when the page is left
+    // (or the app goes to the background), so the spoofed apps restart once, not on every
+    // change (owner's decision 2026-11-03). The draft starts from what is set now.
+    var draftOn by remember { mutableStateOf(repo.fakePlaceOn()) }
+    var draftFake by remember { mutableStateOf(android.provider.Settings.Secure.getString(context.contentResolver, ShieldTable.KEY_SPOOF_FAKE)) }
+    var draftName by remember { mutableStateOf(repo.fakePlaceName()) }
+    var draftProfile by remember { mutableStateOf(repo.spoofProfile()) }
+    var dirty by remember { mutableStateOf(false) }
+    val on = draftOn
+    val fake = draftFake
+    val name = draftName
+    val profile = draftProfile
     val real = remember(tick, version) { repo.realLocationApps() }
     val apps by repo.apps.collectAsStateWithLifecycle()
     val journal by repo.journal.collectAsStateWithLifecycle()
@@ -225,9 +233,37 @@ private fun SpoofedValuesPage(vm: GuardViewModel, nav: GuardNav, modifier: Modif
     var ipChecking by remember { mutableStateOf(false) }
 
     fun save(next: SpoofProfile?) {
-        ShieldTable.setSpoofProfile(context, next)
+        draftProfile = next
+        dirty = true
         ipResult = null
         version++
+    }
+
+    /** Writes the draft in one burst (the platform coalesces it into one restart). */
+    fun flush() {
+        if (!dirty) return
+        dirty = false
+        val place = draftFake
+        if (place != null) {
+            ShieldTable.setFakePlace(context, place, draftName ?: "", draftProfile)
+        } else {
+            ShieldTable.setSpoofProfile(context, draftProfile)
+        }
+        com.android.settings.ichthys.guard.os.ShieldSwitch(ShieldTable.KEY_SPOOF_ON, com.android.settings.ichthys.guard.model.SettingsTable.SECURE)
+            .setOn(context.contentResolver, draftOn)
+    }
+    val flushNow = androidx.compose.runtime.rememberUpdatedState { flush() }
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    androidx.compose.runtime.DisposableEffect(lifecycle) {
+        val observer =
+            androidx.lifecycle.LifecycleEventObserver { _, event ->
+                if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) flushNow.value()
+            }
+        lifecycle.addObserver(observer)
+        onDispose {
+            lifecycle.removeObserver(observer)
+            flushNow.value()
+        }
     }
 
     LazyColumn(modifier, contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -247,7 +283,8 @@ private fun SpoofedValuesPage(vm: GuardViewModel, nav: GuardNav, modifier: Modif
                         (if (profile != null) " They also see ${profile.countryName} as their country." else "")
                     else "Off: every app gets your real position, country and carrier.",
                 ) { v ->
-                    com.android.settings.ichthys.guard.os.ShieldSwitch(ShieldTable.KEY_SPOOF_ON, com.android.settings.ichthys.guard.model.SettingsTable.SECURE).setOn(context.contentResolver, v)
+                    draftOn = v
+                    dirty = true
                     version++
                 }
                 lastFake?.let {
@@ -271,7 +308,11 @@ private fun SpoofedValuesPage(vm: GuardViewModel, nav: GuardNav, modifier: Modif
                                         followLanguage = profile == null || profile.locale != null,
                                     )
                                 else profile
-                            ShieldTable.setFakePlace(context, place.latLon, place.name, next)
+                            draftFake = place.latLon
+                            draftName = place.name
+                            draftProfile = next
+                            draftOn = true
+                            dirty = true
                             searching = false
                             ipResult = null
                             version++
@@ -359,9 +400,10 @@ private fun SpoofedValuesPage(vm: GuardViewModel, nav: GuardNav, modifier: Modif
                     TextButton(onClick = { save(null) }) { Text("Fake the position only") }
                 }
                 Text(
-                    "Changing anything here restarts the spoofed apps, so they start with the new values.",
+                    if (dirty) "Changes apply when you leave this page; the spoofed apps then restart once with the new values."
+                    else "Changes apply when you leave this page, and the spoofed apps restart once with the new values.",
                     style = MaterialTheme.typography.bodySmall,
-                    color = t.muted,
+                    color = if (dirty) t.accent else t.muted,
                 )
             }
         }
