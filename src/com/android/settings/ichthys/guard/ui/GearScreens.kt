@@ -523,15 +523,36 @@ private fun languageName(tag: String): String =
     Locale.forLanguageTag(tag).getDisplayName(Locale.ENGLISH).ifEmpty { tag }
 
 /** What https://am.i.mullvad.net/json says about this phone's connection. */
-private data class IpCheck(val ip: String, val country: String, val city: String, val mullvad: Boolean) {
-    /** True when the reported country is [iso] (by its English name, or the code). */
+private data class IpCheck(
+    val ip: String,
+    val country: String,
+    val city: String,
+    val mullvad: Boolean,
+    /** The ISO code from the Mullvad exit server's name ("us-lax-wg-401" -> "US"), or null. */
+    val serverCode: String? = null,
+) {
+    /** True when the reported country is [iso]: by the exit server's code, the code, or the name. */
     fun matches(iso: String): Boolean {
+        if (serverCode != null) return serverCode.equals(iso, true)
         if (country.equals(iso, true)) return true
-        val want = Locale("", iso).getDisplayCountry(Locale.ENGLISH)
-        if (country.equals(want, true)) return true
-        // The names Mullvad uses are the usual English ones; find the code they stand for.
-        val code = Locale.getISOCountries().firstOrNull { Locale("", it).getDisplayCountry(Locale.ENGLISH).equals(country, true) }
+        val name = norm(country)
+        // Mullvad's own short names ("USA", "UK") and spellings that differ from Java's
+        NAME_ALIASES[name]?.let { return it.equals(iso, true) }
+        if (name == norm(Locale("", iso).getDisplayCountry(Locale.ENGLISH))) return true
+        val code = Locale.getISOCountries().firstOrNull { norm(Locale("", it).getDisplayCountry(Locale.ENGLISH)) == name }
         return code != null && code.equals(iso, true)
+    }
+
+    private companion object {
+        fun norm(s: String) = s.lowercase(Locale.ROOT).replace("&", "and").replace(Regex("[^a-z]"), "")
+
+        val NAME_ALIASES = mapOf(
+            "usa" to "US", "unitedstatesofamerica" to "US", "uk" to "GB", "greatbritain" to "GB",
+            "uae" to "AE", "czechrepublic" to "CZ", "southkorea" to "KR", "russia" to "RU",
+            "hongkong" to "HK", "macau" to "MO", "turkey" to "TR", "turkiye" to "TR",
+            "vietnam" to "VN", "macedonia" to "MK", "northmacedonia" to "MK", "ivorycoast" to "CI",
+            "burma" to "MM", "palestine" to "PS", "vatican" to "VA", "taiwan" to "TW",
+        )
     }
 }
 
@@ -551,6 +572,9 @@ private fun checkMyIp(): IpCheck? =
                     country = o.optString("country"),
                     city = o.optString("city"),
                     mullvad = o.optBoolean("mullvad_exit_ip", false),
+                    serverCode = o.optString("mullvad_exit_ip_hostname").substringBefore('-')
+                        .takeIf { o.optBoolean("mullvad_exit_ip", false) && it.length == 2 }
+                        ?.uppercase(Locale.ROOT),
                 )
             }
         } finally {
