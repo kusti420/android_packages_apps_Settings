@@ -307,6 +307,11 @@ class GuardRepository(
             refreshEvidence(force = true)
             // IchthysOS: one bad batch must not end the live stream for the process's life.
             backend.liveEvents().collect { batch ->
+                // IchthysOS: the service drops batches while this process is frozen in the
+                // background; page the missed events in before the new batch.
+                val first = batch.minOfOrNull { it.seq }
+                if (first != null && first > lastSeq + 1)
+                    runCatching { catchUp(first) }.onFailure { Log.w(TAG, "event catch-up failed", it) }
                 runCatching { ingest(batch) }.onFailure { Log.w(TAG, "event ingest failed", it) }
             }
         }
@@ -356,6 +361,17 @@ class GuardRepository(
         lastSeq = maxOf(lastSeq, minOf(_stats.value.lastSeq, newestWindow).coerceAtLeast(0))
         var pages = 0
         while (pages++ < MAX_BACKFILL_PAGES) {
+            val page = backend.getEvents(lastSeq, PAGE)
+            if (page.isEmpty()) break
+            ingest(page)
+            if (page.size < PAGE) break
+        }
+    }
+
+    /** Pages events after [lastSeq] up to (not including) [upTo] from the service's ring. */
+    private fun catchUp(upTo: Long) {
+        var pages = 0
+        while (lastSeq < upTo - 1 && pages++ < MAX_BACKFILL_PAGES) {
             val page = backend.getEvents(lastSeq, PAGE)
             if (page.isEmpty()) break
             ingest(page)
