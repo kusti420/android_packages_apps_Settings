@@ -132,6 +132,23 @@ object SpoofChecks {
                     }
                 }
             }
+            "spoof.dns_leak" -> {
+                // IchthysOS: the resolvers that carry the app's lookups are what every
+                // authoritative server (the app's own included) sees. A lookup that works while
+                // the app is offline went out on another network; a resolver in another country
+                // than the profile places the phone there.
+                c.equal("dns_ok_while_offline", "false", "names resolve while the app is offline")
+                if (values["dns_check"] == "ok") {
+                    val countries = values["dns_resolver_countries"].orEmpty()
+                        .split('|').map { it.trim() }.filter { it.isNotEmpty() && it != "none" }
+                    if (countries.isNotEmpty()) {
+                        c.compared++
+                        val other = countries.filterNot { CountryNames.matches(it, p.country) }
+                        if (other.isNotEmpty())
+                            c.failures += "DNS resolver in ${other.joinToString()}, profile ${p.countryName}"
+                    }
+                }
+            }
             else -> return null
         }
         return when {

@@ -24,8 +24,10 @@ import java.util.Locale
  * those, so a plain name comparison reported a correct exit country as a mismatch.
  */
 object CountryNames {
+    // IchthysOS: Mullvad says "The Netherlands", "The Bahamas"; Locale says "Netherlands".
     private fun norm(s: String) =
-        s.lowercase(Locale.ROOT).replace("&", "and").replace(Regex("[^a-z]"), "")
+        s.trim().lowercase(Locale.ROOT).removePrefix("the ").replace("&", "and")
+            .replace(Regex("[^a-z]"), "")
 
     private val ALIASES = mapOf(
         "usa" to "US", "unitedstatesofamerica" to "US", "uk" to "GB", "greatbritain" to "GB",
