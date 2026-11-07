@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
@@ -103,6 +104,10 @@ fun AboutAppScreen(vm: GuardViewModel, nav: GuardNav, packageName: String, modif
         }
     var confirmReset by remember { mutableStateOf(false) }
     var resetMessage by remember { mutableStateOf<String?>(null) }
+    // IchthysOS: cutting the network is confirmed first, and a fix applied here stays in the row
+    // as done, so the tap has visible feedback (the score changing alone says little).
+    var confirmBlock by remember { mutableStateOf(false) }
+    var applied by remember { mutableStateOf(setOf<RiskFix>()) }
     fun update(change: (com.android.settings.ichthys.guard.model.AppPolicy) -> com.android.settings.ichthys.guard.model.AppPolicy) =
         repo.updatePolicy(packageName, change)
     fun applyFix(fix: RiskFix) {
@@ -120,6 +125,7 @@ fun AboutAppScreen(vm: GuardViewModel, nav: GuardNav, packageName: String, modif
             RiskFix.REVIEW_PERMISSIONS ->
                 ctx.startActivity(Intent(Intent.ACTION_MANAGE_APP_PERMISSIONS).putExtra(Intent.EXTRA_PACKAGE_NAME, packageName))
         }
+        if (fix != RiskFix.REVIEW_PERMISSIONS) applied = applied + fix
     }
 
     LazyColumn(modifier, contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -136,8 +142,16 @@ fun AboutAppScreen(vm: GuardViewModel, nav: GuardNav, packageName: String, modif
                         KeyValue(factor.label, if (factor.points > 0) "+${factor.points}" else "")
                     }
                     Row(Modifier.horizontalScroll(rememberScrollState())) {
-                        risk.fixes.filter { it != RiskFix.STRICT_TRACKERS || HostRules.ENFORCED }.forEachIndexed { i, fix ->
-                            TextButton(onClick = { applyFix(fix) }) { Text(fix.label, color = if (i == 0) t.accent else t.text) }
+                        val offered = risk.fixes.filter { it != RiskFix.STRICT_TRACKERS || HostRules.ENFORCED }
+                        // A fix applied here leaves the score's list; it stays, disabled, as done.
+                        (offered + applied).distinct().forEachIndexed { i, fix ->
+                            val done = fix in applied
+                            TextButton(
+                                onClick = { if (fix == RiskFix.BLOCK_NETWORK) confirmBlock = true else applyFix(fix) },
+                                enabled = !done,
+                            ) {
+                                Text(if (done) doneLabel(fix) else fix.label, color = if (done) t.muted else if (i == 0) t.accent else t.text)
+                            }
                         }
                     }
                 }
@@ -188,7 +202,7 @@ fun AboutAppScreen(vm: GuardViewModel, nav: GuardNav, packageName: String, modif
                 val first = Insights.firstSeen(events, packageName)
                 if (first.isEmpty()) Text("None yet.", color = t.muted)
                 for ((host, time) in first.take(30)) {
-                    Row(Modifier.fillMaxWidth().clickable { nav.openHost(host) }.padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable { nav.openHost(host) }.padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(host, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium.copy(fontFamily = t.mono), maxLines = 1, overflow = TextOverflow.Ellipsis)
                         repo.matcher.match(host)?.let { Tag(it.name, emphasized = true) }
                         Text(formatDateTime(time), style = MaterialTheme.typography.labelSmall, color = t.muted)
@@ -253,6 +267,28 @@ fun AboutAppScreen(vm: GuardViewModel, nav: GuardNav, packageName: String, modif
             }
         }
     }
+    if (confirmBlock) {
+        val label = app?.label ?: packageName
+        AlertDialog(
+            onDismissRequest = { confirmBlock = false },
+            containerColor = t.raised,
+            titleContentColor = t.text,
+            textContentColor = t.muted,
+            title = { Text("Block $label's network?") },
+            text = { Text("It loses every network connection until you set Internet to Allow again on its page. Nothing else about it changes.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmBlock = false
+                        applyFix(RiskFix.BLOCK_NETWORK)
+                    }
+                ) {
+                    Text("Block", color = t.danger)
+                }
+            },
+            dismissButton = { TextButton(onClick = { confirmBlock = false }) { Text("Cancel", color = t.text) } },
+        )
+    }
     if (confirmReset) {
         val label = app?.label ?: packageName
         AlertDialog(
@@ -287,3 +323,13 @@ fun AboutAppScreen(vm: GuardViewModel, nav: GuardNav, packageName: String, modif
         )
     }
 }
+
+/** What a fix's button says once it was applied from this page. */
+private fun doneLabel(fix: RiskFix): String =
+    when (fix) {
+        RiskFix.STRICT_TRACKERS -> "Strict blocking on"
+        RiskFix.BACKGROUND_OFF -> "Background off"
+        RiskFix.SCREEN_OFF -> "Screen-off block on"
+        RiskFix.BLOCK_NETWORK -> "Blocked"
+        RiskFix.REVIEW_PERMISSIONS -> fix.label
+    }

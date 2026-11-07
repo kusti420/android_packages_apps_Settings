@@ -16,6 +16,7 @@
 
 package com.android.settings.ichthys.guard.ui
 
+import android.content.Context
 import android.database.ContentObserver
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -37,6 +38,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
@@ -58,6 +60,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.Color
@@ -281,13 +284,14 @@ fun ShareBar(fraction: Float, modifier: Modifier = Modifier, color: Color = Guar
 @Composable
 fun EventRow(e: LabeledEvent, showApp: Boolean, modifier: Modifier = Modifier) {
     val t = Guard.tokens
+    val context = LocalContext.current
     Column(modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Text(
-                formatClock(e.event.timeMs),
+                formatClock(context, e.event.timeMs),
                 style = MaterialTheme.typography.labelSmall.copy(fontFamily = t.mono),
                 color = t.muted,
             )
@@ -322,9 +326,31 @@ fun EventRow(e: LabeledEvent, showApp: Boolean, modifier: Modifier = Modifier) {
     }
 }
 
-private val clockFormat = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault())
+/** The clock pattern after the phone's 24-hour setting (Settings > System > Date & time). */
+fun clockPattern(context: Context, seconds: Boolean = false): String {
+    val h24 = android.text.format.DateFormat.is24HourFormat(context)
+    return when {
+        h24 && seconds -> "HH:mm:ss"
+        h24 -> "HH:mm"
+        seconds -> "h:mm:ss a"
+        else -> "h:mm a"
+    }
+}
 
-fun formatClock(ms: Long): String = synchronized(clockFormat) { clockFormat.format(Date(ms)) }
+/**
+ * "09:12:05" or "9:12:05 AM". The formatter is built per call: a shared one would keep the time
+ * zone and the clock setting of its first use.
+ */
+fun formatClock(context: Context, ms: Long): String =
+    java.text.SimpleDateFormat(clockPattern(context, seconds = true), java.util.Locale.getDefault()).format(Date(ms))
+
+/** A minute of the day (a schedule's "Starts 09:30") in the phone's clock format. */
+fun formatMinuteOfDay(context: Context, minuteOfDay: Int): String {
+    val cal = java.util.Calendar.getInstance()
+    cal.set(java.util.Calendar.HOUR_OF_DAY, minuteOfDay / 60)
+    cal.set(java.util.Calendar.MINUTE, minuteOfDay % 60)
+    return java.text.SimpleDateFormat(clockPattern(context), java.util.Locale.getDefault()).format(cal.time)
+}
 
 fun formatDateTime(ms: Long): String =
     DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(ms))
@@ -430,7 +456,8 @@ fun NavRow(
                 color = t.muted,
                 modifier = Modifier.padding(end = 8.dp),
             )
-        Text("›", color = t.muted, style = MaterialTheme.typography.titleMedium)
+        // Decoration: the row is the control and its title says what it opens.
+        Text("›", Modifier.clearAndSetSemantics {}, color = t.muted, style = MaterialTheme.typography.titleMedium)
     }
 }
 
@@ -474,6 +501,8 @@ fun KeyValue(label: String, value: String, danger: Boolean = false) {
         Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
         Text(
             value,
+            // The value is measured first: capped, so a long one can't squeeze the label to nothing.
+            modifier = Modifier.widthIn(max = 180.dp),
             style = MaterialTheme.typography.labelMedium.copy(fontFamily = t.mono),
             color = if (danger) t.danger else t.muted,
             maxLines = 1,
@@ -486,19 +515,20 @@ fun KeyValue(label: String, value: String, danger: Boolean = false) {
 @Composable
 fun PageHeader(title: String, onBack: () -> Unit, subtitle: String? = null) {
     val t = Guard.tokens
-    TextButton(onClick = onBack) { Text("‹ Back") }
+    TextButton(onClick = onBack) { Text("‹ Back", Modifier.clearAndSetSemantics { contentDescription = "Back" }) }
     Text(title, style = MaterialTheme.typography.headlineMedium)
     if (subtitle != null)
         Text(subtitle, style = MaterialTheme.typography.bodySmall, color = t.muted)
 }
 
-/** "09:12" today, "Mon 09:12" within the week, else a short date. */
-fun formatWhen(ms: Long, now: Long = System.currentTimeMillis()): String {
+/** "09:12" today, "Mon 09:12" within the week, else a short date; "9:12 PM" on a 12-hour clock. */
+fun formatWhen(context: Context, ms: Long, now: Long = System.currentTimeMillis()): String {
     val d = now - ms
+    val clock = clockPattern(context)
     return when {
         d < 0 || d >= 6 * 86_400_000L -> formatDateTime(ms)
         d >= 86_400_000L ->
-            java.text.SimpleDateFormat("EEE HH:mm", java.util.Locale.getDefault()).format(Date(ms))
-        else -> java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(Date(ms))
+            java.text.SimpleDateFormat("EEE $clock", java.util.Locale.getDefault()).format(Date(ms))
+        else -> java.text.SimpleDateFormat(clock, java.util.Locale.getDefault()).format(Date(ms))
     }
 }

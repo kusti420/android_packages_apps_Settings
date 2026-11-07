@@ -40,7 +40,9 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -48,6 +50,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import com.android.settings.ichthys.guard.model.SpoofProfile
@@ -61,6 +65,7 @@ import java.util.Date
 import java.util.Locale
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -107,7 +112,15 @@ fun SharedValuesScreen(
                 ?.filter { it.isNotEmpty() }
                 .orEmpty()
         }
-    val now = remember(tick) { System.currentTimeMillis() }
+    // A trip's start or end passing while the page is open moves it between the sections, so
+    // the clock ticks every minute (and at once after every change of the values).
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(tick) {
+        while (true) {
+            now = System.currentTimeMillis()
+            delay(60_000)
+        }
+    }
 
     // What the place search is for: null (closed), "home", "trip" or "fake".
     var searchFor by remember { mutableStateOf<String?>(null) }
@@ -120,7 +133,7 @@ fun SharedValuesScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item {
-            TextButton(onClick = onBack) { Text("‹ Back") }
+            TextButton(onClick = onBack) { Text("‹ Back", Modifier.clearAndSetSemantics { contentDescription = "Back" }) }
             Text("Shared values", style = MaterialTheme.typography.headlineMedium)
             Text(
                 "Settings that several parts of the system use, changed in one place.",

@@ -142,6 +142,15 @@ class GuardRepository(
     private val _apps = MutableStateFlow<List<AppInfo>>(emptyList())
     val apps: StateFlow<List<AppInfo>> = _apps.asStateFlow()
 
+    private val _quarantined = MutableStateFlow<Set<String>>(emptySet())
+    /**
+     * IchthysOS: the packages held in Guard's first-launch quarantine. One binder call per user
+     * app, so it is read off the main thread: by [refreshApps], after a release ([journal]) and
+     * by [refreshQuarantine]; the pages read this instead of asking the package manager in
+     * composition.
+     */
+    val quarantined: StateFlow<Set<String>> = _quarantined.asStateFlow()
+
     private val _policies = MutableStateFlow(policyStore.load())
     val policies: StateFlow<PolicySet> = _policies.asStateFlow()
 
@@ -338,6 +347,12 @@ class GuardRepository(
         _apps.value = list
         // Relabel what we already have now that names are known.
         _events.update { evs -> evs.map { label(it.event) } }
+        refreshQuarantine()
+    }
+
+    /** IchthysOS: re-reads which apps are quarantined (see [quarantined]). Off the main thread. */
+    fun refreshQuarantine() {
+        _quarantined.value = quarantinedApps().mapTo(HashSet()) { it.packageName }
     }
 
     fun appFor(pkg: String): AppInfo? =
@@ -425,6 +440,8 @@ class GuardRepository(
         }
         flushJournal(now)
         if (backend.isLive) backend.addJournal(uid, kind, detail)
+        // IchthysOS: a release changes [quarantined]; re-read it off the main thread.
+        if (kind == JournalKind.RELEASED) scope.launch { refreshQuarantine() }
     }
 
     /** IchthysOS: records a finished or started verification run. */

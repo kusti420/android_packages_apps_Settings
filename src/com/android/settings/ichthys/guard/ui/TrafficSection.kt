@@ -36,6 +36,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -211,6 +213,11 @@ fun TrafficSection(
                                                 fontFamily = t.mono
                                             ),
                                         color = t.muted,
+                                        // The chevron is decoration; the row opens the host.
+                                        modifier =
+                                            Modifier.clearAndSetSemantics {
+                                                contentDescription = quantity(d.hits, "attempt")
+                                            },
                                     )
                                 }
                                 Row(Modifier.padding(vertical = 2.dp)) {

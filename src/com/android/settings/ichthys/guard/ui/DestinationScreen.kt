@@ -35,6 +35,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -81,7 +83,7 @@ fun DestinationScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item {
-            TextButton(onClick = onBack) { Text("‹ Back") }
+            TextButton(onClick = onBack) { Text("‹ Back", Modifier.clearAndSetSemantics { contentDescription = "Back" }) }
             Text(
                 destination,
                 style = MaterialTheme.typography.headlineSmall.copy(fontFamily = t.mono),

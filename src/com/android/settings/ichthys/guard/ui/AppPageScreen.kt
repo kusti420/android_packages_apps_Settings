@@ -23,10 +23,13 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -41,6 +44,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -81,6 +87,7 @@ fun AppPageScreen(
 ) {
     val repo = vm.repo
     val t = Guard.tokens
+    val context = LocalContext.current
     val policies by repo.policies.collectAsStateWithLifecycle()
     val byApp by vm.eventsByApp.collectAsStateWithLifecycle()
     val journal by repo.journal.collectAsStateWithLifecycle()
@@ -103,7 +110,8 @@ fun AppPageScreen(
     val controls = remember(version, tick, policy, auto, rules) { repo.appControls(packageName) }
     val differs = remember(controls, policy) { policy.preset.spec?.let { controls.differences(it) } ?: emptySet() }
     val fakeOn = remember(tick) { repo.fakePlaceOn() }
-    val quarantined = remember(app, version) { app != null && repo.quarantinedApps().any { it.packageName == packageName } }
+    val quarantinedApps by repo.quarantined.collectAsStateWithLifecycle()
+    val quarantined = app != null && packageName in quarantinedApps
     val restrictable by
         produceState(true, packageName) {
             value = app?.let { a -> withContext(Dispatchers.IO) { repo.backend.isRestrictable(a.uid) } } ?: true
@@ -131,7 +139,9 @@ fun AppPageScreen(
 
     LazyColumn(modifier, contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
-            Row(verticalAlignment = Alignment.CenterVertically) { TextButton(onClick = nav.back) { Text("‹ Back") } }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = nav.back) { Text("‹ Back", Modifier.clearAndSetSemantics { contentDescription = "Back" }) }
+            }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 AppIcon(packageName, Modifier.padding(end = 12.dp), size = 48.dp)
                 Column {
@@ -199,11 +209,27 @@ fun AppPageScreen(
                     Text(
                         // IchthysOS: during the review, Done releases it, not a preset.
                         if (firstLaunchReview) "Changes apply right away; the app opens when you tap Done."
-                        else "Picking a preset releases the app from quarantine and opens it.",
+                        else "Pick a preset, or set the controls and tap Open with these settings.",
                         style = MaterialTheme.typography.bodySmall,
                         color = t.accent,
                         modifier = Modifier.padding(top = 4.dp),
                     )
+                    if (!firstLaunchReview) {
+                        // IchthysOS: the way out for an app set up by hand; the Custom chip only
+                        // names the preset and releases nothing.
+                        Button(
+                            onClick = {
+                                scope.launch(Dispatchers.IO) {
+                                    releaseQuarantine(repo, packageName, "Released with its own settings")
+                                    withContext(Dispatchers.Main) { changed() }
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp).heightIn(min = 48.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = t.accent, contentColor = t.onAccent),
+                        ) {
+                            Text("Open with these settings")
+                        }
+                    }
                 }
             }
         }
@@ -356,7 +382,7 @@ fun AppPageScreen(
                 for (p in proofs) LatestJournalRow(p, now) {}
                 val stand = lastVerified
                 Text(
-                    stand?.let { "Last verified ${formatWhen(it.finishedMs, now)} with the tester as its stand-in · ${it.verdictLine}" }
+                    stand?.let { "Last verified ${formatWhen(context, it.finishedMs, now)} with the tester as its stand-in · ${it.verdictLine}" }
                         ?: "Not verified yet: run the tester app with this app's setup to see what such an app really gets.",
                     style = MaterialTheme.typography.bodySmall,
                     color = if (stand?.passed == false) t.danger else t.muted,

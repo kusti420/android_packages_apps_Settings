@@ -111,6 +111,7 @@ object GuardNotifications {
         }
         try {
             createChannels(app)
+            channelsReady = true
             scheduleWeeklyReport(app)
             scheduleMaintenance(app)
             val filter =
@@ -121,6 +122,23 @@ object GuardNotifications {
             Log.w(TAG, "init failed", e)
         }
         Thread({ catchUp(app) }, "IchthysGuardCatchUp").start()
+    }
+
+    @Volatile private var channelsReady = false
+
+    /**
+     * IchthysOS: the channels exist before anything is posted. [init] creates them, but a
+     * receiver can start this process after the unlock and before BOOT_COMPLETED, and a post
+     * to a missing channel is dropped silently.
+     */
+    private fun ensureChannels(ctx: Context) {
+        if (channelsReady) return
+        try {
+            createChannels(ctx.applicationContext)
+            channelsReady = true
+        } catch (e: RuntimeException) {
+            Log.w(TAG, "channels not created", e)
+        }
     }
 
     private fun createChannels(ctx: Context) {
@@ -371,6 +389,7 @@ object GuardNotifications {
             )
         }
         val n = builder.build()
+        ensureChannels(ctx)
         ctx.getSystemService(NotificationManager::class.java).notify(notificationId(pkg), n)
     }
 
@@ -386,6 +405,7 @@ object GuardNotifications {
                 .setAutoCancel(true)
                 .setTimeoutAfter(15_000)
                 .build()
+        ensureChannels(ctx)
         ctx.getSystemService(NotificationManager::class.java).notify(notificationId(pkg), n)
     }
 
@@ -416,6 +436,7 @@ object GuardNotifications {
                 .setContentIntent(openAppIntent(ctx, pkg))
                 .setAutoCancel(true)
                 .build()
+        ensureChannels(ctx)
         ctx.getSystemService(NotificationManager::class.java)
             .notify(ALERT_ID_BASE + ((pkg + type.name).hashCode() and 0xFFFFFF), n)
     }
@@ -450,6 +471,7 @@ object GuardNotifications {
                 .setOnlyAlertOnce(true)
                 .setAutoCancel(true)
                 .build()
+        ensureChannels(ctx)
         ctx.getSystemService(NotificationManager::class.java).notify(reviewNotificationId(pkg), n)
     }
 
@@ -480,6 +502,7 @@ object GuardNotifications {
                 .setContentIntent(openAppIntent(ctx, null))
                 .setAutoCancel(true)
                 .build()
+        ensureChannels(ctx)
         ctx.getSystemService(NotificationManager::class.java).notify(TIGHTEN_ID, n)
     }
 
@@ -508,6 +531,7 @@ object GuardNotifications {
                 .setContentIntent(openAppIntent(ctx, null))
                 .setAutoCancel(true)
                 .build()
+        ensureChannels(ctx)
         ctx.getSystemService(NotificationManager::class.java).notify(REPORT_ID, n)
     }
 }

@@ -42,6 +42,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.android.settings.ichthys.guard.model.AppPreset
@@ -62,6 +63,7 @@ import kotlinx.coroutines.withContext
 fun VerifyScreen(vm: GuardViewModel, nav: GuardNav, forPackage: String?, modifier: Modifier = Modifier) {
     val repo = vm.repo
     val t = Guard.tokens
+    val context = LocalContext.current
     val history by repo.verify.collectAsStateWithLifecycle()
     val running by vm.verifier.current.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
@@ -97,8 +99,9 @@ fun VerifyScreen(vm: GuardViewModel, nav: GuardNav, forPackage: String?, modifie
         if (!probe.installed) {
             item {
                 Warn(
-                    "IchthysProbe isn't installed",
-                    "Build it with `m IchthysProbe IchthysProbeHelper` and install both with adb as user apps. Never put it into /system: a system app is exempt from the shields, so the results would be wrong.",
+                    "The tester app isn't on this phone",
+                    "Verification needs the IchthysProbe tester app, which this build does not ship.",
+                    developerNote = "Build it with `m IchthysProbe IchthysProbeHelper` and install both with adb as user apps. Never put it into /system: a system app is exempt from the shields, so the results would be wrong.",
                 )
             }
         } else if (probe.inSystem) {
@@ -156,7 +159,11 @@ fun VerifyScreen(vm: GuardViewModel, nav: GuardNav, forPackage: String?, modifie
                     message = null
                     scope.launch(Dispatchers.IO) {
                         val err = vm.verifier.start(forPackage)
-                        if (err != null) withContext(Dispatchers.Main) { message = err }
+                        // IchthysOS: the runner's build-and-adb sentence is for developers.
+                        if (err != null)
+                            withContext(Dispatchers.Main) {
+                                message = if (err.startsWith("IchthysProbe isn't installed")) "The tester app isn't on this phone." else err
+                            }
                     }
                 },
                 enabled = !busy && probe.installed && !probe.quarantined,
@@ -178,7 +185,7 @@ fun VerifyScreen(vm: GuardViewModel, nav: GuardNav, forPackage: String?, modifie
         }
         if (shown != null) {
             item {
-                GuardCard(title = if (shown.done) "Result · ${formatWhen(shown.finishedMs, now)}" else "Running") {
+                GuardCard(title = if (shown.done) "Result · ${formatWhen(context, shown.finishedMs, now)}" else "Running") {
                     Text(
                         shown.verdictLine,
                         style = MaterialTheme.typography.titleLarge,
@@ -296,9 +303,11 @@ fun VerifyScreen(vm: GuardViewModel, nav: GuardNav, forPackage: String?, modifie
 private const val VerifyRun_HISTORY_SHOWN = 10
 private const val PROBE = com.android.settings.ichthys.guard.data.VerifyRunner.PROBE_PACKAGE
 
+/** A red card. [developerNote] (build and adb steps) stays behind a "For developers" button. */
 @Composable
-private fun Warn(title: String, text: String) {
+private fun Warn(title: String, text: String, developerNote: String? = null) {
     val t = Guard.tokens
+    var showNote by remember { mutableStateOf(false) }
     Surface(
         Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(t.radius),
@@ -308,6 +317,13 @@ private fun Warn(title: String, text: String) {
         Column(Modifier.padding(16.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium, color = t.danger)
             Text(text, style = MaterialTheme.typography.bodySmall, color = t.muted)
+            if (developerNote != null) {
+                TextButton(onClick = { showNote = !showNote }) {
+                    Text(if (showNote) "Hide the developer steps" else "For developers")
+                }
+                if (showNote)
+                    Text(developerNote, style = MaterialTheme.typography.bodySmall.copy(fontFamily = t.mono), color = t.muted)
+            }
         }
     }
 }

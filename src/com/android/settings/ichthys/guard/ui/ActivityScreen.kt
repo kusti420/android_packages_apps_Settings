@@ -58,6 +58,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.AndroidViewModel
@@ -507,8 +511,16 @@ private fun ReasonFilterButton(selected: Set<BlockReason>, onToggle: (BlockReaso
             DropdownMenuItem(text = { Text("Any reason") }, onClick = { onToggle(null); open = false })
             for (r in BlockReason.entries.filter { it != BlockReason.NONE }) {
                 DropdownMenuItem(
-                    text = { Text((if (r in selected) "✓ " else "") + "Blocked · ${r.label}") },
+                    text = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            // The tick is decoration; the item's selected state says it.
+                            if (r in selected) Text("✓ ", Modifier.clearAndSetSemantics {})
+                            Text("Blocked · ${r.label}")
+                        }
+                    },
                     onClick = { onToggle(r) },
+                    // this.selected: the receiver's property, not the parameter of the same name.
+                    modifier = Modifier.semantics { this.selected = r in selected },
                 )
             }
         }
@@ -559,6 +571,7 @@ private fun AppFilterButton(
 @Composable
 private fun RunRow(run: EventRun, open: Boolean, onToggle: () -> Unit) {
     val t = Guard.tokens
+    val context = LocalContext.current
     val e = run.head
     Column(
         Modifier.fillMaxWidth()
@@ -573,9 +586,11 @@ private fun RunRow(run: EventRun, open: Boolean, onToggle: () -> Unit) {
                 if (open) "▾" else "▸",
                 style = MaterialTheme.typography.bodyMedium.copy(fontFamily = t.mono),
                 color = t.muted,
+                // The glyph only shows the state; say the state, not the glyph.
+                modifier = Modifier.clearAndSetSemantics { contentDescription = if (open) "Expanded" else "Collapsed" },
             )
             Text(
-                "${formatClock(run.firstMs)}–${formatClock(run.lastMs)}",
+                "${formatClock(context, run.firstMs)}–${formatClock(context, run.lastMs)}",
                 style = MaterialTheme.typography.labelSmall.copy(fontFamily = t.mono),
                 color = t.muted,
             )
@@ -618,7 +633,7 @@ private fun GroupHeader(g: EventGroup, open: Boolean, onToggle: () -> Unit) {
             if (open) "▾" else "▸",
             style = MaterialTheme.typography.bodyMedium.copy(fontFamily = t.mono),
             color = t.muted,
-            modifier = Modifier.padding(end = 8.dp),
+            modifier = Modifier.padding(end = 8.dp).clearAndSetSemantics { contentDescription = if (open) "Expanded" else "Collapsed" },
         )
         Column(Modifier.weight(1f)) {
             Text(

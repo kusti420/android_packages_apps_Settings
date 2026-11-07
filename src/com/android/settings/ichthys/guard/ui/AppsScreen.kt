@@ -16,6 +16,7 @@
 
 package com.android.settings.ichthys.guard.ui
 
+import android.content.Context
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Column
@@ -37,6 +38,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -58,6 +60,8 @@ enum class AppChip(val label: String) {
     UNVERIFIED("Unverified"),
     UNTRUSTED("Untrusted"),
     CUSTOM("Custom"),
+    /** IchthysOS: apps put to sleep (unused for weeks, no network). */
+    ASLEEP("Asleep"),
     SYSTEM("System apps"),
 }
 
@@ -80,27 +84,36 @@ fun AppsScreen(vm: GuardViewModel, nav: GuardNav, modifier: Modifier = Modifier)
     var query by rememberSaveable { mutableStateOf("") }
     var chip by rememberSaveable { mutableStateOf(AppChip.ALL) }
     val t = Guard.tokens
-    val quarantined = remember(apps) { repo.quarantinedApps().mapTo(HashSet()) { it.packageName } }
+    val context = LocalContext.current
+    val quarantined by repo.quarantined.collectAsStateWithLifecycle()
     val lastVerified = remember(verify) { verifiedAt(verify.runs) }
     val presetVerified = remember(verify) { presetVerifiedAt(verify.runs) }
     val now = System.currentTimeMillis()
     val paused = status.pausedUntil > now
 
-    val rows =
-        remember(apps, policies, denyNow, blockedToday, tick, query, chip, status, paused, quarantined, lastVerified, unfinished) {
+    // IchthysOS: every row's state is worked out once per change of its inputs (presetDifferences
+    // reads a dozen settings per app); the search text and the chips only filter the result.
+    // System apps join the base list only while their chip is on, as before.
+    val withSystem = chip == AppChip.SYSTEM
+    val base =
+        remember(apps, policies, denyNow, blockedToday, tick, status, paused, quarantined, lastVerified, presetVerified, unfinished, withSystem) {
             apps
-                .filter { a ->
-                    (chip == AppChip.SYSTEM || !a.isSystem) &&
-                        (query.isBlank() ||
-                            a.label.contains(query, true) ||
-                            a.packageName.contains(query, true))
-                }
+                .filter { a -> withSystem || !a.isSystem }
                 .map { a ->
                     val p = policies.policyFor(a.packageName)
                     // Verified: a run for the app itself, or a passed "Verify my protection" run
                     // whose stand-in was this app's preset (same lists, same rule).
                     val verified = lastVerified[a.packageName] ?: presetVerified[p.preset]
-                    AppRow(a, rowState(repo, a, p, denyNow[a.uid], blockedToday[a.packageName] ?: 0, a.packageName in quarantined, verified, status.pausedUntil > now, a.packageName in unfinished))
+                    AppRow(a, rowState(repo, a, p, denyNow[a.uid], blockedToday[a.packageName] ?: 0, a.packageName in quarantined, verified, paused, a.packageName in unfinished))
+                }
+        }
+    val rows =
+        remember(base, query, chip) {
+            base
+                .filter { r ->
+                    query.isBlank() ||
+                        r.app.label.contains(query, true) ||
+                        r.app.packageName.contains(query, true)
                 }
                 .filter { r ->
                     when (chip) {
@@ -109,9 +122,10 @@ fun AppsScreen(vm: GuardViewModel, nav: GuardNav, modifier: Modifier = Modifier)
                         AppChip.UNVERIFIED -> r.state.verifiedMs == null
                         AppChip.UNTRUSTED -> r.state.preset == AppPreset.UNTRUSTED || r.state.quarantined
                         AppChip.CUSTOM -> r.state.preset == AppPreset.CUSTOM && !r.state.policy.isDefault || r.state.differs
+                        AppChip.ASLEEP -> r.state.policy.dormant
                     }
                 }
-                    .let { list ->
+                .let { list ->
                     if (chip == AppChip.BLOCKED_NOW) list.sortedByDescending { it.state.blockedToday } else list
                 }
         }
@@ -169,15 +183,15 @@ fun AppsScreen(vm: GuardViewModel, nav: GuardNav, modifier: Modifier = Modifier)
                         overflow = TextOverflow.Ellipsis,
                     )
                     val s = r.state
+                    // IchthysOS: a preset is named in the status line ("Maps preset"), not as a tag.
                     when {
                         s.quarantined -> Tag("QUARANTINED", danger = true)
-                        s.preset != AppPreset.CUSTOM -> Tag(s.preset.label.uppercase(), emphasized = true)
-                        !s.policy.isDefault -> Tag("CUSTOM")
+                        s.preset == AppPreset.CUSTOM && !s.policy.isDefault -> Tag("CUSTOM")
                     }
                     if (s.differs) PresetDot(true)
                 }
                 Text(
-                    r.state.line,
+                    r.state.line(context),
                     style = MaterialTheme.typography.bodySmall,
                     color = if (r.state.offline != null) t.text else t.muted,
                 )
@@ -204,8 +218,8 @@ data class RowState(
     /** IchthysOS: quarantined, and its first-launch review was closed without a choice. */
     val reviewUnfinished: Boolean = false,
 ) {
-    val line: String
-        get() =
+    /** The status line; [context] for the clock format of "verified 09:12". */
+    fun line(context: Context): String =
             buildList {
                     when {
                         quarantined && reviewUnfinished -> add("Quarantined · review not finished")
@@ -216,6 +230,8 @@ data class RowState(
                         policy.network == NetworkAccess.UNMETERED_ONLY -> add("Wi-Fi only")
                         else -> add("Online")
                     }
+                    // IchthysOS: the preset in plain words ("Maps preset"), instead of a tag.
+                    if (!quarantined && preset != AppPreset.CUSTOM) add("${preset.label} preset")
                     if (!quarantined) add(
                         when (location) {
                             LocationMode.REAL -> "real location"
@@ -224,7 +240,7 @@ data class RowState(
                         }
                     )
                     if (blockedToday > 0) add(quantity(blockedToday, "block") + " today")
-                    verifiedMs?.let { add("verified ${formatWhen(it)}") }
+                    verifiedMs?.let { add("verified ${formatWhen(context, it)}") }
                 }
                 .joinToString(" · ")
 }

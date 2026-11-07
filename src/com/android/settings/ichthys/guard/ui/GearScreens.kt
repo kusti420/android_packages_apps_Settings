@@ -17,7 +17,9 @@
 package com.android.settings.ichthys.guard.ui
 
 import android.app.TimePickerDialog
+import android.content.Context
 import android.net.Uri
+import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
@@ -53,6 +55,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -93,13 +96,12 @@ fun GearScreen(vm: GuardViewModel, nav: GuardNav, modifier: Modifier = Modifier)
     val rules by repo.rules.collectAsStateWithLifecycle()
     val status by vm.status.collectAsStateWithLifecycle()
     val policies by repo.policies.collectAsStateWithLifecycle()
-    val apps by repo.apps.collectAsStateWithLifecycle()
     val tick = rememberSettingsTick(ShieldTable.OBSERVED_URIS)
     val masters = remember(tick) { repo.masterShieldsOn() }
     val fakeOn = remember(tick) { repo.fakePlaceOn() }
     val spoofSummary = remember(tick) { repo.spoofProfile()?.summary(repo.fakePlaceName()) }
     val realCount = remember(tick) { repo.realLocationApps().size }
-    val quarantined = remember(apps) { repo.quarantinedApps().size }
+    val quarantined by repo.quarantined.collectAsStateWithLifecycle()
     val asleep = remember(policies) { policies.policies.values.count { it.dormant } }
     val hostRules = remember(policies, rules) { rules.rules.size + policies.policies.values.count { it.allowedHosts.isNotEmpty() || it.blockedHosts.isNotEmpty() } }
 
@@ -118,7 +120,7 @@ fun GearScreen(vm: GuardViewModel, nav: GuardNav, modifier: Modifier = Modifier)
                 NavRow("Screen-off rule", if (auto.screenOffAll) "On · ${quantity(auto.screenOffExempt.size, "app")} stay online" else "Off", { nav.openPage("screenoff") })
                 NavRow("Schedules", auto.activeProfiles().takeIf { it.isNotEmpty() }?.let { "Active now: " + it.joinToString { p -> p.name } } ?: "${quantity(auto.profiles.count { it.enabled }, "schedule")} on", { nav.openPage("schedules") })
                 NavRow("Lockdown keeps online", "Set on each app's page", { nav.openPage("lockdown") }, trailing = quantity(rules.lockdown.allowlist.size, "app"))
-                NavRow("New apps", if (quarantined > 0) "${quantity(quarantined, "app")} waiting for a preset" else "Quarantined until you pick a preset · local network blocked", { nav.openPage("newapps") })
+                NavRow("New apps", if (quarantined.isNotEmpty()) "${quantity(quarantined.size, "app")} waiting for a preset" else "Quarantined until you pick a preset · local network blocked", { nav.openPage("newapps") })
                 NavRow("Notifications", "Ongoing and silent notifications folded into chips or one row", { nav.openPage("quiet") })
                 NavRow("Alerts", "Camera, mic and location in the background, wake-ups, boot starts · kept in the journal", { nav.openPage("alerts") }, trailing = "${AlertType.entries.count { auto.alertOn(it) }} of ${AlertType.entries.size}")
                 NavRow("Put unused apps to sleep", if (auto.autoTighten) "On · after ${auto.autoTightenDays} days" + (if (asleep > 0) " · ${quantity(asleep, "app")} asleep" else "") else "Off", { nav.openPage("sleep") })
@@ -289,7 +291,7 @@ private fun SpoofedValuesPage(vm: GuardViewModel, nav: GuardNav, modifier: Modif
                     version++
                 }
                 lastFake?.let {
-                    Text("Last fake fix delivered ${formatWhen(it.timeMs)} to ${it.appLabel ?: "an app"}", style = MaterialTheme.typography.bodySmall.copy(fontFamily = t.mono), color = t.muted)
+                    Text("Last fake fix delivered ${formatWhen(context, it.timeMs)} to ${it.appLabel ?: "an app"}", style = MaterialTheme.typography.bodySmall.copy(fontFamily = t.mono), color = t.muted)
                 }
             }
         }
@@ -772,12 +774,14 @@ private fun ProfileEditor(p: Profile, active: Boolean, taggedApps: Int, onChange
                 }
             }
         }
+        // The phone's clock setting decides 24-hour or AM/PM, in the pickers and their labels.
+        val h24 = android.text.format.DateFormat.is24HourFormat(ctx)
         Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = { TimePickerDialog(ctx, { _, h, m -> onChange(p.copy(startMinute = h * 60 + m)) }, p.startMinute / 60, p.startMinute % 60, true).show() }) {
-                Text("Starts %02d:%02d".format(p.startMinute / 60, p.startMinute % 60))
+            TextButton(onClick = { TimePickerDialog(ctx, { _, h, m -> onChange(p.copy(startMinute = h * 60 + m)) }, p.startMinute / 60, p.startMinute % 60, h24).show() }) {
+                Text("Starts ${formatMinuteOfDay(ctx, p.startMinute)}")
             }
-            TextButton(onClick = { TimePickerDialog(ctx, { _, h, m -> onChange(p.copy(endMinute = h * 60 + m)) }, p.endMinute / 60, p.endMinute % 60, true).show() }) {
-                Text("Ends %02d:%02d".format(p.endMinute / 60, p.endMinute % 60))
+            TextButton(onClick = { TimePickerDialog(ctx, { _, h, m -> onChange(p.copy(endMinute = h * 60 + m)) }, p.endMinute / 60, p.endMinute % 60, h24).show() }) {
+                Text("Ends ${formatMinuteOfDay(ctx, p.endMinute)}")
             }
             if (onDelete != null) TextButton(onClick = onDelete) { Text("Delete") }
         }
@@ -818,7 +822,7 @@ private fun LockdownKeepsPage(vm: GuardViewModel, nav: GuardNav, modifier: Modif
             GuardCard(title = "Apps · ${rules.lockdown.allowlist.size}") {
                 val kept = apps.filter { it.packageName in rules.lockdown.allowlist }
                 if (kept.isEmpty()) Text("No app keeps its network in lockdown.", color = t.muted)
-                for (a in kept) AppLine(a.packageName, a.label, nav.openApp) { Text("›", color = t.muted) }
+                for (a in kept) AppLine(a.packageName, a.label, nav.openApp) { Text("›", Modifier.clearAndSetSemantics {}, color = t.muted) }
                 TextButton(onClick = { pick = !pick }) { Text(if (pick) "Hide the full list" else "Choose from all apps") }
                 if (pick) {
                     apps.sortedWith(compareBy({ it.packageName !in rules.lockdown.allowlist }, { it.label.lowercase() })).forEach { a ->
@@ -840,8 +844,8 @@ private fun NewAppsPage(vm: GuardViewModel, nav: GuardNav, modifier: Modifier) {
     val repo = vm.repo
     val t = Guard.tokens
     val apps by repo.apps.collectAsStateWithLifecycle()
-    val journal by repo.journal.collectAsStateWithLifecycle()
-    val waiting = remember(apps, journal) { repo.quarantinedApps() }
+    val quarantined by repo.quarantined.collectAsStateWithLifecycle()
+    val waiting = remember(apps, quarantined) { apps.filter { it.packageName in quarantined } }
     val scope = rememberCoroutineScope()
     LazyColumn(modifier, contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item { PageHeader("New apps", nav.back) }
@@ -1009,20 +1013,35 @@ private fun BackupPage(vm: GuardViewModel, nav: GuardNav, modifier: Modifier) {
                         }
                 }
         }
+    // IchthysOS: a backup replaces the whole setup, so the file is read first and confirmed (its
+    // name and how many apps it sets up) before anything is written.
+    var pendingImport by remember { mutableStateOf<PendingImport?>(null) }
+    fun runImport(text: String) {
+        scope.launch {
+            message =
+                try {
+                    val n = withContext(Dispatchers.Default) { repo.importJson(text) }
+                    "Backup imported: every app's preset and setup, the shield lists, the fake place and its spoofed values, schedules" + (if (n > 0) " and ${quantity(n, "host rule")}" else "")
+                } catch (e: IllegalArgumentException) {
+                    e.message ?: "Not a Guard backup"
+                } catch (e: Exception) {
+                    "Import failed: ${e.message ?: e.javaClass.simpleName}"
+                }
+        }
+    }
     val importLauncher =
         rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
             if (uri != null)
                 scope.launch {
-                    message =
-                        try {
-                            val text = withContext(Dispatchers.IO) { context.contentResolver.openInputStream(uri)!!.use { it.readBytes().toString(Charsets.UTF_8) } }
-                            val n = withContext(Dispatchers.Default) { repo.importJson(text) }
-                            "Backup imported: every app's preset and setup, the shield lists, the fake place and its spoofed values, schedules" + (if (n > 0) " and ${quantity(n, "host rule")}" else "")
-                        } catch (e: IllegalArgumentException) {
-                            e.message ?: "Not a Guard backup"
-                        } catch (e: Exception) {
-                            "Import failed: ${e.message ?: e.javaClass.simpleName}"
-                        }
+                    try {
+                        pendingImport =
+                            withContext(Dispatchers.IO) {
+                                val text = context.contentResolver.openInputStream(uri)!!.use { it.readBytes().toString(Charsets.UTF_8) }
+                                PendingImport(displayName(context, uri), backupAppCount(text), text)
+                            }
+                    } catch (e: Exception) {
+                        message = "Import failed: ${e.message ?: e.javaClass.simpleName}"
+                    }
                 }
         }
     LazyColumn(modifier, contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -1042,7 +1061,49 @@ private fun BackupPage(vm: GuardViewModel, nav: GuardNav, modifier: Modifier) {
             }
         }
     }
+    pendingImport?.let { p ->
+        AlertDialog(
+            onDismissRequest = { pendingImport = null },
+            containerColor = t.raised,
+            titleContentColor = t.text,
+            textContentColor = t.muted,
+            title = { Text("Replace the current setup with this backup?") },
+            text = {
+                Text(
+                    p.name + (p.apps?.let { " · ${quantity(it, "app")}" } ?: "") +
+                        ". Every app's preset and setup, the shield lists, the fake place and its spoofed values and the schedules are replaced by what it holds. This can't be undone."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        pendingImport = null
+                        runImport(p.text)
+                    }
+                ) {
+                    Text("Replace", color = t.danger)
+                }
+            },
+            dismissButton = { TextButton(onClick = { pendingImport = null }) { Text("Cancel", color = t.text) } },
+        )
+    }
 }
+
+/** IchthysOS: a backup picked for import, waiting for the user's Replace. */
+private class PendingImport(val name: String, val apps: Int?, val text: String)
+
+/** The file's name as the picker shows it (OpenableColumns), else the end of its path. */
+private fun displayName(context: Context, uri: Uri): String =
+    runCatching {
+            context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+                if (c.moveToFirst()) c.getString(0) else null
+            }
+        }
+        .getOrNull() ?: uri.lastPathSegment ?: "this file"
+
+/** How many apps a Guard backup sets up (its policies), or null when that can't be read cheaply. */
+private fun backupAppCount(text: String): Int? =
+    runCatching { JSONObject(text).optJSONObject("policies")?.optJSONObject("policies")?.length() }.getOrNull()
 
 // ---- Tracker host rules (coming) ---------------------------------------------------------------
 
@@ -1129,7 +1190,7 @@ private fun TrackerRulesPage(vm: GuardViewModel, nav: GuardNav, modifier: Modifi
 
 @Composable
 internal fun AppLine(pkg: String, label: String, onOpenApp: (String) -> Unit, trailing: @Composable () -> Unit) {
-    Row(Modifier.fillMaxWidth().clickable { onOpenApp(pkg) }.padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable { onOpenApp(pkg) }.padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
         AppIcon(pkg, Modifier.padding(end = 10.dp), size = 28.dp)
         Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
         trailing()

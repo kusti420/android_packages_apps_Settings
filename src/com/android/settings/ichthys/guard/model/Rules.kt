@@ -58,7 +58,24 @@ data class CustomRule(
 }
 
 object HostPattern {
-    fun normalize(s: String): String = s.trim().trimEnd('.').lowercase()
+    /**
+     * Lower case, no trailing dot and, for a name with non-ASCII letters, the punycode form the
+     * monitor reports ("bücher.de" is seen as "xn--bcher-kva.de"); the "=" prefix and "*" labels
+     * pass through.
+     */
+    fun normalize(s: String): String {
+        val t = s.trim().trimEnd('.').lowercase()
+        if (t.all { it.code < 128 }) return t
+        val exact = t.startsWith("=")
+        val body = if (exact) t.substring(1) else t
+        val ascii =
+            try {
+                java.net.IDN.toASCII(body, java.net.IDN.ALLOW_UNASSIGNED)
+            } catch (e: IllegalArgumentException) {
+                body
+            }
+        return if (exact) "=$ascii" else ascii
+    }
 
     /** Returns an error message, or null if [pattern] is valid. */
     fun validate(pattern: String): String? {

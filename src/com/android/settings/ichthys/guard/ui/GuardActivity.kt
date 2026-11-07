@@ -56,6 +56,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -229,7 +230,8 @@ open class GuardActivity : ComponentActivity() {
                                             tab = item
                                             stack = ""
                                         },
-                                        icon = { Text(item.glyph) },
+                                        // The glyph is decoration; the label names the tab.
+                                        icon = { Text(item.glyph, Modifier.clearAndSetSemantics {}) },
                                         label = { Text(item.label) },
                                         colors = colors,
                                     )
@@ -303,6 +305,8 @@ open class GuardActivity : ComponentActivity() {
             val repo = GuardRepository.get(app)
             repo.refreshPause()
             repo.refreshEvidence(force = true)
+            // IchthysOS: and which apps are quarantined (released or held while Guard was away).
+            repo.refreshQuarantine()
         }
     }
 
@@ -384,6 +388,15 @@ open class GuardActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        // IchthysOS: Customize again for the same app lands in the review already open (the
+        // task is reused); for another app this review ends, unfinished as when it is left,
+        // and that app's review starts in a task of its own.
+        val pkg = intent.getStringExtra(Intent.EXTRA_PACKAGE_NAME)
+        if (reviewPkg != null && !pkg.isNullOrEmpty() && pkg != reviewPkg) {
+            finish()
+            startActivity(intent)
+            return
+        }
         handleIntent(intent)
     }
 
@@ -418,13 +431,15 @@ open class GuardActivity : ComponentActivity() {
 
         /**
          * IchthysOS: the first-launch review's Customize: [packageName]'s page in review mode
-         * ([GuardReviewActivity]), in a task of its own, with the app still quarantined.
+         * ([GuardReviewActivity]), in a task of its own, with the app still quarantined. Opened
+         * again, the review already running is reused (see [onNewIntent]) instead of a second
+         * task for the same app.
          */
         @JvmStatic
         fun firstLaunchReviewIntent(context: Context, packageName: String): Intent =
             Intent(context, GuardReviewActivity::class.java)
                 .putExtra(Intent.EXTRA_PACKAGE_NAME, packageName)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_MULTIPLE_TASK)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
 
         /** Opens Guard at [packageName]'s page (the stock App info page's Guard row). */
         @JvmStatic

@@ -111,7 +111,10 @@ enum class ShieldProof(val code: Int, val label: String, val protective: Boolean
     SMS(8, "texts emptied", true),
     CONTACTS_WRITE(9, "contact change dropped", true),
     CALENDAR_WRITE(10, "calendar change dropped", true),
-    CALL_LOG_WRITE(11, "call log change dropped", true);
+    CALL_LOG_WRITE(11, "call log change dropped", true),
+    CLIPBOARD(12, "clipboard read refused", true),
+    USAGE(13, "usage history emptied", true),
+    CALL_NUMBER(14, "caller number hidden", true);
 
     val isLocation: Boolean
         get() = this == LOCATION_REAL || this == LOCATION_FAKE || this == LOCATION_NONE

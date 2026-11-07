@@ -47,6 +47,11 @@ data class CategoryResult(
     val skip: Int = 0,
     /** "probe.id: why", one per failed expectation. */
     val failures: List<String> = emptyList(),
+    /**
+     * IchthysOS: of [fail], the probes that errored out ("probe.id: probe error: …" in
+     * [failures]) rather than broke a promise. Still failed (fail-closed), shown as errors.
+     */
+    val errors: Int = 0,
 ) {
     val ok: Boolean
         get() = fail == 0
@@ -67,6 +72,11 @@ data class VerifyPhase(
     val proofs: List<String> = emptyList(),
     /** Null while waiting; "timeout" when the probe never answered. */
     val error: String? = null,
+    /**
+     * IchthysOS: the phone was locked or asleep while the probe measured; the categories are
+     * kept for reading but [error] says so and the phase counts as failed, never as a pass.
+     */
+    val inconclusive: Boolean = false,
 ) {
     val done: Boolean
         get() = finishedMs != 0L
@@ -125,12 +135,13 @@ data class VerifyRun(
             if (parts.isEmpty()) null
             else
                 CategoryResult(
-                    c,
-                    parts.sumOf { it.pass },
-                    parts.sumOf { it.fail },
-                    parts.sumOf { it.info },
-                    parts.sumOf { it.skip },
-                    parts.flatMap { it.failures },
+                    category = c,
+                    pass = parts.sumOf { it.pass },
+                    fail = parts.sumOf { it.fail },
+                    info = parts.sumOf { it.info },
+                    skip = parts.sumOf { it.skip },
+                    failures = parts.flatMap { it.failures },
+                    errors = parts.sumOf { it.errors },
                 )
         }
 }

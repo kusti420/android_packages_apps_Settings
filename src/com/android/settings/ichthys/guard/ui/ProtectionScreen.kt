@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -49,6 +50,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -70,6 +72,7 @@ import kotlinx.coroutines.delay
 fun ProtectionScreen(vm: GuardViewModel, nav: GuardNav, modifier: Modifier = Modifier) {
     val repo = vm.repo
     val t = Guard.tokens
+    val context = LocalContext.current
     val s by vm.today.collectAsStateWithLifecycle()
     val status by vm.status.collectAsStateWithLifecycle()
     val events by repo.events.collectAsStateWithLifecycle()
@@ -100,7 +103,7 @@ fun ProtectionScreen(vm: GuardViewModel, nav: GuardNav, modifier: Modifier = Mod
     val fakeOn = remember(tick) { repo.fakePlaceOn() }
     // IchthysOS: the spoofed values that go with the fake place (Gear › Spoofed values).
     val spoofSummary = remember(tick) { repo.spoofProfile()?.summary(repo.fakePlaceName()) }
-    val quarantined = remember(apps, journal) { repo.quarantinedApps() }
+    val quarantined by repo.quarantined.collectAsStateWithLifecycle()
     val lastVerify = verify.last
     val paused = status.pausedUntil > now
 
@@ -160,7 +163,7 @@ fun ProtectionScreen(vm: GuardViewModel, nav: GuardNav, modifier: Modifier = Mod
                         )
                         Button(
                             onClick = { repo.pause(0) },
-                            modifier = Modifier.fillMaxWidth().height(48.dp).padding(top = 8.dp),
+                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp).heightIn(min = 48.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = t.accent, contentColor = t.onAccent),
                         ) {
                             Text("Resume now")
@@ -214,7 +217,7 @@ fun ProtectionScreen(vm: GuardViewModel, nav: GuardNav, modifier: Modifier = Mod
                         },
                     evidence =
                         lastBlock?.let {
-                            "Last block ${formatWhen(it.event.timeMs, now)} · ${it.appLabel} · ${it.event.reason.sentence}"
+                            "Last block ${formatWhen(context, it.event.timeMs, now)} · ${it.appLabel} · ${it.event.reason.sentence}"
                         } ?: "No block recorded yet",
                     danger = status.live && status.health and com.android.settings.ichthys.guard.backend.Health.FIREWALL == 0,
                 ) { nav.openTab(GuardTab.ACTIVITY) }
@@ -222,8 +225,8 @@ fun ProtectionScreen(vm: GuardViewModel, nav: GuardNav, modifier: Modifier = Mod
                     title = "Shields",
                     state = "${masters.first} of ${masters.second} on",
                     evidence =
-                        lastProof?.let { "Last proof ${formatWhen(it.timeMs, now)} · ${it.appLabel ?: "an app"} · ${it.shield?.label}" }
-                            ?: lastVerify?.let { "Verified ${formatWhen(it.finishedMs, now)} · ${it.verdictLine}" }
+                        lastProof?.let { "Last proof ${formatWhen(context, it.timeMs, now)} · ${it.appLabel ?: "an app"} · ${it.shield?.label}" }
+                            ?: lastVerify?.let { "Verified ${formatWhen(context, it.finishedMs, now)} · ${it.verdictLine}" }
                             ?: "No proof yet · run Verify",
                     danger = masters.first < masters.second,
                 ) { nav.openPage("shields") }
@@ -237,7 +240,7 @@ fun ProtectionScreen(vm: GuardViewModel, nav: GuardNav, modifier: Modifier = Mod
                         },
                     evidence =
                         lastLocation?.let {
-                            "Last fix ${formatWhen(it.timeMs, now)} · ${it.appLabel ?: "an app"} · ${it.shield?.label}"
+                            "Last fix ${formatWhen(context, it.timeMs, now)} · ${it.appLabel ?: "an app"} · ${it.shield?.label}"
                         } ?: "No fix delivered yet",
                 ) { nav.openPage("spoofed") }
                 EngineCard(
@@ -245,7 +248,7 @@ fun ProtectionScreen(vm: GuardViewModel, nav: GuardNav, modifier: Modifier = Mod
                     state = if (quarantined.isEmpty()) "No app waiting" else "${quantity(quarantined.size, "app")} waiting",
                     evidence =
                         journal.entries.lastOrNull { it.journal == JournalKind.QUARANTINE }?.let {
-                            "Last ${formatWhen(it.timeMs, now)} · ${it.appLabel ?: "an app"}"
+                            "Last ${formatWhen(context, it.timeMs, now)} · ${it.appLabel ?: "an app"}"
                         } ?: "New apps are held until you pick a preset",
                 ) { nav.openPage("newapps") }
             }
@@ -262,7 +265,7 @@ fun ProtectionScreen(vm: GuardViewModel, nav: GuardNav, modifier: Modifier = Mod
                     Text(if (running?.done == false) "Verification running…" else "Verify my protection")
                 }
                 Text(
-                    lastVerify?.let { "Last run ${formatWhen(it.finishedMs, now)} · ${it.verdictLine}" }
+                    lastVerify?.let { "Last run ${formatWhen(context, it.finishedMs, now)} · ${it.verdictLine}" }
                         ?: "Runs the tester app as a blocked app, a messenger and a maps app, and shows what each really got.",
                     style = MaterialTheme.typography.bodySmall,
                     color = if (lastVerify?.passed == false) t.danger else t.muted,
@@ -418,12 +421,13 @@ private fun latestMixed(
 @Composable
 private fun LatestNetRow(e: LabeledEvent, now: Long, onClick: () -> Unit) {
     val t = Guard.tokens
+    val context = LocalContext.current
     Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 5.dp),
+        Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(onClick = onClick).padding(vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Text(formatWhen(e.event.timeMs, now), style = MaterialTheme.typography.labelSmall.copy(fontFamily = t.mono), color = t.muted)
+        Text(formatWhen(context, e.event.timeMs, now), style = MaterialTheme.typography.labelSmall.copy(fontFamily = t.mono), color = t.muted)
         Text(
             "${e.appLabel} → ${e.event.destination}",
             Modifier.weight(1f),
@@ -438,14 +442,15 @@ private fun LatestNetRow(e: LabeledEvent, now: Long, onClick: () -> Unit) {
 @Composable
 fun LatestJournalRow(j: JournalEntry, now: Long, onClick: () -> Unit) {
     val t = Guard.tokens
+    val context = LocalContext.current
     val kind = j.journal
     val proof: ShieldProof? = j.shield
     Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 5.dp),
+        Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(onClick = onClick).padding(vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Text(formatWhen(j.timeMs, now), style = MaterialTheme.typography.labelSmall.copy(fontFamily = t.mono), color = t.muted)
+        Text(formatWhen(context, j.timeMs, now), style = MaterialTheme.typography.labelSmall.copy(fontFamily = t.mono), color = t.muted)
         Text(
             buildString {
                 if (j.appLabel != null) append(j.appLabel).append(" · ")

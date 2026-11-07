@@ -77,6 +77,18 @@ data class Shield(
         val listed = if (listedMeansReal) !protect else protect
         for (key in keys) IchthysProtect.setListed(context, key, pkg, listed)
     }
+
+    /**
+     * IchthysOS: true when the shield really applies to the app right now: [isProtected] and
+     * every master switch of the shield is on (its own [masters], and for the "writes" row the
+     * switches of the write shields it stands for). A shield switched off protects nobody,
+     * whatever the app's list says; Verify sends only enforced shields to the probe.
+     */
+    fun isEnforced(context: Context, pkg: String): Boolean {
+        if (!isProtected(context, pkg)) return false
+        val cr = context.contentResolver
+        return masters.all { it.isOn(cr) } && followsRead.all { it.master.isOn(cr) }
+    }
 }
 
 /**

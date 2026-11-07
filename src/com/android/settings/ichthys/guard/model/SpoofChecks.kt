@@ -110,18 +110,26 @@ object SpoofChecks {
                 }
             }
             "spoof.network_visibility" -> {
-                c.equal("non_vpn_dns_servers", "0", "DNS servers of the real network")
-                c.equal("dhcp_dns1_set", "false", "DHCP DNS visible")
+                // IchthysOS: the platform hides neither the real network's DNS servers nor the
+                // DHCP lease from a spoofed app (nothing in frameworks/base strips them: without
+                // a VPN the uid sees the Wi-Fi LinkProperties, and WifiManager.getDhcpInfo isn't
+                // VPN-gated), so non_vpn_dns_servers and dhcp_* stay informational, never a
+                // fail. What the profile promises: with vpn=true the app is offline until a VPN
+                // is up, and then its active network is the VPN.
                 val ipCheck = values["ip_check"]
                 if (e.ipBlocked) {
                     c.equal("ip_check", "offline", "IP check without a VPN")
                     c.equal("active_network", "false", "an active network without a VPN")
-                } else if (ipCheck == "ok") {
-                    c.compared++
-                    val got = values["ip_country"].orEmpty()
-                    // IchthysOS: by code, not English name (Mullvad says "USA", "UK").
-                    if (got.isNotEmpty() && !CountryNames.matches(got, p.country))
-                        note = "IP country \"$got\", profile ${p.countryName}: the VPN exits elsewhere"
+                } else {
+                    if (p.vpn && e.vpnUp)
+                        c.equal("active_is_vpn", "true", "the active network is the VPN")
+                    if (ipCheck == "ok") {
+                        c.compared++
+                        val got = values["ip_country"].orEmpty()
+                        // IchthysOS: by code, not English name (Mullvad says "USA", "UK").
+                        if (got.isNotEmpty() && !CountryNames.matches(got, p.country))
+                            note = "IP country \"$got\", profile ${p.countryName}: the VPN exits elsewhere"
+                    }
                 }
             }
             else -> return null

@@ -18,6 +18,7 @@ package com.android.settings.ichthys.guard.data
 
 import android.app.AlarmManager
 import android.app.PendingIntent
+import android.content.ContentUris
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
@@ -39,11 +40,11 @@ import com.android.settings.ichthys.guard.model.AppPolicy
 import com.android.settings.ichthys.guard.model.AppPreset
 import com.android.settings.ichthys.guard.model.CategoryResult
 import com.android.settings.ichthys.guard.model.JournalKind
+import com.android.settings.ichthys.guard.model.LocalNetwork
 import com.android.settings.ichthys.guard.model.LocationMode
 import com.android.settings.ichthys.guard.model.NetworkAccess
 import com.android.settings.ichthys.guard.model.PolicySet
 import com.android.settings.ichthys.guard.model.ScanMode
-import com.android.settings.ichthys.guard.model.ScreenOffMode
 import com.android.settings.ichthys.guard.model.SpoofChecks
 import com.android.settings.ichthys.guard.model.VerifyCategory
 import com.android.settings.ichthys.guard.model.VerifyPhase
@@ -92,10 +93,17 @@ class VerifyRunner private constructor(private val context: Context) {
     private val lock = Any()
 
     init {
-        // A run interrupted by a process death: give the probe its own setup back. Off the main
-        // thread: the first get() comes from the ViewModel.
-        if (prefs.contains(KEY_SNAPSHOT) && !prefs.contains(KEY_TOKEN)) {
-            Thread({ synchronized(lock) { restorePendingSnapshot() } }, "IchthysGuardVerify").start()
+        // A run interrupted by a process death: a fresh process can never continue it (the
+        // phase's alarm doesn't survive a reboot and the probe's answer may never come), so the
+        // probe gets its own setup back now, token or not, and the recorded run is closed as
+        // interrupted. Off the main thread: the first get() comes from the ViewModel. Under
+        // [lock], and only while no new run has started in the meantime.
+        if (prefs.contains(KEY_SNAPSHOT)) {
+            Thread(
+                    { synchronized(lock) { if (_current.value == null) abandonInterruptedRun() } },
+                    "IchthysGuardVerify",
+                )
+                .start()
         }
     }
 
@@ -185,6 +193,11 @@ class VerifyRunner private constructor(private val context: Context) {
         }
         // Let the pushes land before the probe measures.
         SystemClock.sleep(600)
+        // IchthysOS: LAN = Block is enforced by revoking ACCESS_LOCAL_NETWORK, which kills the
+        // probe's process. Had the service's apply landed after the launch, the running probe
+        // would die (a 5-minute "No answer"): wait until the service holds the LAN state the
+        // stand-in asks for.
+        awaitLanState()
         val started = System.currentTimeMillis()
         val updated =
             run.copy(
@@ -206,7 +219,10 @@ class VerifyRunner private constructor(private val context: Context) {
         putExpectations(intent, PROBE_PACKAGE)
         putTruths(intent)
         try {
-            context.startActivity(intent)
+            // Share Guard's identity with the probe: its launch check (GuardRun.trustedLaunch)
+            // accepts a Guard run only from the system uid, which it can only see this way.
+            val options = android.app.ActivityOptions.makeBasic().setShareIdentityEnabled(true)
+            context.startActivity(intent, options.toBundle())
         } catch (e: RuntimeException) {
             Log.w(TAG, "could not start the probe", e)
             finishPhase(token, null, "IchthysProbe couldn't be started: ${e.message}")
@@ -249,18 +265,29 @@ class VerifyRunner private constructor(private val context: Context) {
                 intent.putExtra(EXTRA_EXPECT_FAKE_LATLON, it)
             }
         }
+        // IchthysOS: a spoofed app (on the fake place) gets empty Wi-Fi, cell and Bluetooth
+        // scans from the platform (IchthysLocationSpoof) whatever its scan control says.
         intent.putExtra(
             EXTRA_EXPECT_SCANS,
-            if (repo.scanMode(pkg) == ScanMode.EMPTY || location == LocationMode.NONE) "empty"
+            if (
+                repo.scanMode(pkg) == ScanMode.EMPTY ||
+                    location == LocationMode.NONE ||
+                    repo.isSpoofed(pkg)
+            )
+                "empty"
             else "real",
         )
         val app = repo.appFor(pkg)
         val lanDenied = app?.let { repo.backend.isLanDenied(it.uid) } ?: true
         intent.putExtra(EXTRA_EXPECT_LAN, if (lanDenied) "blocked" else "allowed")
+        // IchthysOS: only shields that really apply right now: the app's list state and every
+        // master switch of the shield (a shield switched off protects nobody, and the probe
+        // would otherwise report "real data visible although the shield protects this app").
         val protecting =
-            ShieldTable.SHIELDS.filter { it.isProtected(context, pkg) }.map { it.id }
+            ShieldTable.SHIELDS.filter { it.isEnforced(context, pkg) }.map { it.id }
         intent.putExtra(EXTRA_EXPECT_SHIELDS, protecting.joinToString(","))
-        intent.putExtra(EXTRA_EXPECT_SCREEN_OFF, repo.screenOffMode(pkg).name.lowercase())
+        // No expect_screen_off: no probe reads it, and the probe can't test the screen-off rule
+        // while it is on screen (Guard's own events, not the probe, are the evidence for it).
         // IchthysOS: the spoofed values (Gear › Spoofed values). The probe reports raw values and
         // Guard compares them itself (SpoofChecks); the extras let the probe show them too.
         val spoof = spoofExpectation(pkg)
@@ -289,11 +316,15 @@ class VerifyRunner private constructor(private val context: Context) {
         }
     }
 
-    /** Row counts as Settings sees them (every shield exempts the system), so 0 rows is proof. */
+    /**
+     * Row counts as Settings sees them, so 0 rows is proof. These queries return the real rows
+     * only because Settings runs as uid 1000 (the system), which the providers' shields exempt;
+     * the same URIs are what the probe queries (its truth names, PersonalProbes).
+     */
     private fun putTruths(intent: Intent) {
-        fun count(uri: Uri): Int =
+        fun count(uri: Uri, projection: Array<String>? = arrayOf("_id")): Int =
             try {
-                context.contentResolver.query(uri, arrayOf("_id"), null, null, null)?.use {
+                context.contentResolver.query(uri, projection, null, null, null)?.use {
                     it.count
                 } ?: -1
             } catch (e: RuntimeException) {
@@ -303,11 +334,35 @@ class VerifyRunner private constructor(private val context: Context) {
         intent.putExtra("truth_raw_contacts", count(ContactsContract.RawContacts.CONTENT_URI))
         intent.putExtra("truth_phones", count(ContactsContract.CommonDataKinds.Phone.CONTENT_URI))
         intent.putExtra("truth_groups", count(ContactsContract.Groups.CONTENT_URI))
+        intent.putExtra("truth_profile", count(ContactsContract.Profile.CONTENT_URI))
+        // The probe asks ContactsContract.Settings.getDefaultAccount(), not for rows: 1 when a
+        // default account for new contacts is set, 0 when none, -1 when the call fails.
+        intent.putExtra(
+            "truth_default_account",
+            try {
+                if (ContactsContract.Settings.getDefaultAccount(context.contentResolver) != null) 1
+                else 0
+            } catch (e: RuntimeException) {
+                -1
+            },
+        )
+        // The SIM providers build their own cursors; a projection is ignored (null, as the probe).
+        intent.putExtra("truth_sim_phonebook", count(Uri.parse("content://icc/adn"), null))
         intent.putExtra("truth_calendars", count(CalendarContract.Calendars.CONTENT_URI))
         intent.putExtra("truth_events", count(CalendarContract.Events.CONTENT_URI))
+        val now = System.currentTimeMillis()
+        val instances = CalendarContract.Instances.CONTENT_URI.buildUpon()
+        ContentUris.appendId(instances, now)
+        ContentUris.appendId(instances, now + 30L * 86_400_000L)
+        intent.putExtra("truth_instances_30d", count(instances.build()))
         intent.putExtra("truth_calllog", count(CallLog.Calls.CONTENT_URI))
         intent.putExtra("truth_sms", count(Telephony.Sms.CONTENT_URI))
         intent.putExtra("truth_mms", count(Telephony.Mms.CONTENT_URI))
+        intent.putExtra(
+            "truth_conversations",
+            count(Uri.parse("content://mms-sms/conversations?simple=true")),
+        )
+        intent.putExtra("truth_sms_icc", count(Uri.parse("content://sms/icc"), null))
     }
 
     /** The probe's answer (any thread). Ignored unless [token] is the one of the open phase. */
@@ -338,15 +393,30 @@ class VerifyRunner private constructor(private val context: Context) {
             val index = prefs.getInt(KEY_PHASE, -1)
             if (index !in run.phases.indices) return
             val phase = run.phases[index]
+            // IchthysOS: the service hands its events over in 500 ms batches, so the attempts
+            // and shield proofs of the probe's last requests reach Guard's stream only after the
+            // reply: give them a moment before the evidence is sampled (a reply only; the timeout
+            // and launch-failure paths have nothing to wait for). Off the main thread (runAsync).
+            if (extras != null) SystemClock.sleep(EVIDENCE_SETTLE_MS)
             val now = System.currentTimeMillis()
+            // IchthysOS: a locked or sleeping phone changes many answers (clipboard reads are
+            // refused while locked, scans and sensors throttle); the probe reports the state it
+            // saw and the phase is inconclusive: its categories are kept, but it is never a pass.
+            val inconclusive =
+                extras != null &&
+                    (extras.getBoolean(EXTRA_KEYGUARD_LOCKED, false) ||
+                        !extras.getBoolean(EXTRA_INTERACTIVE, true))
+            val phaseError = error ?: if (inconclusive) ERROR_INCONCLUSIVE else null
+            val attempts = probeAttempts(phase.startedMs, now)
             val done =
                 phase.copy(
                     finishedMs = now,
                     categories = if (extras != null) categorise(extras) else emptyList(),
-                    attemptsSeen = probeAttempts(phase.startedMs, now).first,
-                    attemptsBlocked = probeAttempts(phase.startedMs, now).second,
+                    attemptsSeen = attempts.first,
+                    attemptsBlocked = attempts.second,
                     proofs = probeProofs(phase.startedMs, now),
-                    error = error,
+                    error = phaseError,
+                    inconclusive = inconclusive,
                 )
             var updated =
                 run.copy(
@@ -354,7 +424,7 @@ class VerifyRunner private constructor(private val context: Context) {
                     probeInSystem = extras?.getBoolean(EXTRA_IN_SYSTEM, run.probeInSystem) ?: run.probeInSystem,
                     diff = extras?.getStringArrayList(EXTRA_DIFF)?.toList() ?: run.diff,
                 )
-            if (index + 1 < run.phases.size && error == null) {
+            if (index + 1 < run.phases.size && phaseError == null) {
                 _current.value = updated
                 repo.recordVerifyRun(updated)
                 launchPhase(updated, index + 1)
@@ -390,12 +460,20 @@ class VerifyRunner private constructor(private val context: Context) {
      */
     private fun categorise(extras: Bundle): List<CategoryResult> {
         val out = LinkedHashMap<VerifyCategory, CategoryResult>()
-        fun add(cat: VerifyCategory, verdict: String, failure: String?) {
+        // IchthysOS: a probe that errored out ("probe error: …", Expect.judge) is a fail
+        // (fail-closed: the promise wasn't checked) but counted apart, so the failures list can
+        // show it as an error rather than a broken promise.
+        fun add(cat: VerifyCategory, verdict: String, failure: String?, probeError: Boolean) {
             val c = out[cat] ?: CategoryResult(cat)
             out[cat] =
                 when (verdict) {
                     "pass" -> c.copy(pass = c.pass + 1)
-                    "fail" -> c.copy(fail = c.fail + 1, failures = c.failures + listOfNotNull(failure))
+                    "fail" ->
+                        c.copy(
+                            fail = c.fail + 1,
+                            errors = c.errors + (if (probeError) 1 else 0),
+                            failures = c.failures + listOfNotNull(failure),
+                        )
                     "skip" -> c.copy(skip = c.skip + 1)
                     else -> c.copy(info = c.info + 1)
                 }
@@ -423,7 +501,8 @@ class VerifyRunner private constructor(private val context: Context) {
                 }
             }
             val cat = categoryOf(id, p.optString("category", ""))
-            add(cat, verdict, if (verdict == "fail") "$id: $why" else null)
+            val probeError = verdict == "fail" && why.startsWith(PROBE_ERROR_PREFIX)
+            add(cat, verdict, if (verdict == "fail") "$id: $why" else null, probeError)
         }
         // Service health, from Guard's own view.
         val health = repo.backend.getHealth()
@@ -517,6 +596,55 @@ class VerifyRunner private constructor(private val context: Context) {
         }
     }
 
+    /**
+     * IchthysOS: closes the run a dead Settings process left open. The probe gets its own setup
+     * back, the phase keys and the alarm go, and the recorded run ends with its open phase as
+     * "Interrupted (Settings restarted)" (a fresh process can't resume it). Holds [lock].
+     */
+    private fun abandonInterruptedRun() {
+        val runId = prefs.getString(KEY_RUN, null)
+        val index = prefs.getInt(KEY_PHASE, -1)
+        prefs.getString(KEY_TOKEN, null)?.let { cancelTimeout(it) }
+        prefs.edit().remove(KEY_TOKEN).remove(KEY_RUN).remove(KEY_PHASE).apply()
+        restorePendingSnapshot()
+        val run = repo.verify.value.runs.firstOrNull { it.id == runId } ?: return
+        if (run.done) return
+        val now = System.currentTimeMillis()
+        repo.recordVerifyRun(
+            run.copy(
+                finishedMs = now,
+                phases =
+                    run.phases.mapIndexed { i, p ->
+                        when {
+                            p.done -> p
+                            i == index || p.startedMs != 0L ->
+                                p.copy(finishedMs = now, error = ERROR_INTERRUPTED)
+                            else -> p.copy(finishedMs = now, error = "Not run (Settings restarted)")
+                        }
+                    },
+            )
+        )
+    }
+
+    /**
+     * Waits (100 ms steps, up to [LAN_SETTLE_MS]) until the service's LAN state for the probe
+     * is the one its policy asks for: blocked for Block and Default (the service treats an app
+     * new since setup as blocked), allowed for Allow. Holds [lock].
+     */
+    private fun awaitLanState() {
+        val uid = repo.appFor(PROBE_PACKAGE)?.uid ?: return
+        val wantDenied =
+            repo.policies.value.policyFor(PROBE_PACKAGE).localNetwork != LocalNetwork.ALLOW
+        val deadline = SystemClock.elapsedRealtime() + LAN_SETTLE_MS
+        while (repo.backend.isLanDenied(uid) != wantDenied) {
+            if (SystemClock.elapsedRealtime() >= deadline) {
+                Log.w(TAG, "the probe's LAN state didn't settle within $LAN_SETTLE_MS ms")
+                return
+            }
+            SystemClock.sleep(100)
+        }
+    }
+
     /** Copies [from]'s policy and list memberships onto [to] (the probe stands in for it). */
     private fun copySetup(from: String, to: String) {
         val src = repo.policies.value.policyFor(from)
@@ -581,6 +709,15 @@ class VerifyRunner private constructor(private val context: Context) {
         private const val KEY_PHASE = "phase"
         private const val KEY_SNAPSHOT = "probe_snapshot"
         private const val TIMEOUT_MS = 5 * 60_000L
+        /** How long a phase waits for the service's LAN state to match the stand-in. */
+        private const val LAN_SETTLE_MS = 2_000L
+        /** The service's event batch (500 ms) plus margin, before a phase's evidence is sampled. */
+        private const val EVIDENCE_SETTLE_MS = 2_500L
+        /** The probe's Expect.judge prefix for a probe that errored out. */
+        private const val PROBE_ERROR_PREFIX = "probe error"
+        private const val ERROR_INTERRUPTED = "Interrupted (Settings restarted)"
+        private const val ERROR_INCONCLUSIVE =
+            "Phone was locked or asleep during the run; results not conclusive"
 
         /** Explicit broadcast from the probe with one phase's verdicts. */
         const val ACTION_RESULT = "org.ichthys.probe.action.RESULT"
@@ -600,7 +737,6 @@ class VerifyRunner private constructor(private val context: Context) {
         const val EXTRA_EXPECT_SCANS = "expect_scans"
         const val EXTRA_EXPECT_LAN = "expect_lan"
         const val EXTRA_EXPECT_SHIELDS = "expect_shields"
-        const val EXTRA_EXPECT_SCREEN_OFF = "expect_screen_off"
         /** IchthysOS: "yes" when the probe gets the spoofed values (fake place on, not on the real list). */
         const val EXTRA_EXPECT_SPOOFED = "expect_spoofed"
         /** IchthysOS: the profile JSON the platform hands the probe ("" when none / not spoofed). */
@@ -614,6 +750,9 @@ class VerifyRunner private constructor(private val context: Context) {
         const val EXTRA_REPORT = "report"
         /** IchthysOS: set by the probe when the phase could not run (it was busy); a phase error. */
         const val EXTRA_ERROR = "error"
+        /** IchthysOS: the keyguard and screen state the probe saw (Report.device); locked or asleep = inconclusive. */
+        const val EXTRA_KEYGUARD_LOCKED = "keyguard_locked"
+        const val EXTRA_INTERACTIVE = "interactive"
 
         @Volatile private var instance: VerifyRunner? = null
 
