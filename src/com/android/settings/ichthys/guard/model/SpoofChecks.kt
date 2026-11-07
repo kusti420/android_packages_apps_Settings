@@ -73,7 +73,8 @@ object SpoofChecks {
             }
             "spoof.configuration" -> {
                 c.intEqual("config_mcc", p.mcc, "Configuration.mcc")
-                if (p.mnc == "00") c.equal("config_mnc_zero", "true", "Configuration.mnc = MNC_ZERO")
+                // IchthysOS: any MNC that parses to 0 ("00", "000") is MNC_ZERO, like the platform
+                if (p.configurationMnc == 0xFFFF) c.equal("config_mnc_zero", "true", "Configuration.mnc = MNC_ZERO")
                 else c.intEqual("config_mnc", p.mnc, "Configuration.mnc")
                 p.locale?.let { c.locale("default_locales", it); c.locale("config_locales", it) }
                 c.country("prop_gsm.sim.operator.iso-country", "prop_gsm.operator.iso-country")
@@ -81,7 +82,8 @@ object SpoofChecks {
                 c.operator("prop_gsm.sim.operator.alpha", "prop_gsm.operator.alpha")
                 c.equal("prop_gsm.operator.isroaming", "false", "roaming")
                 c.intEqual("prop_debug.tracing.mcc", p.mcc, "debug.tracing.mcc")
-                c.intEqual("prop_debug.tracing.mnc", p.mnc, "debug.tracing.mnc")
+                // The platform publishes Configuration.mnc here (MNC_ZERO = 65535 for "00").
+                c.intEqual("prop_debug.tracing.mnc", p.configurationMnc.toString(), "debug.tracing.mnc")
                 p.locale?.let { c.equal("prop_persist.sys.locale", it, "persist.sys.locale") }
                 p.sales?.let { c.equal("prop_ro.boot.sales_code", it, "sales code") }
                 // getprop_*: a child process reads the real values (known side channel): informational.
@@ -117,7 +119,8 @@ object SpoofChecks {
                 } else if (ipCheck == "ok") {
                     c.compared++
                     val got = values["ip_country"].orEmpty()
-                    if (got.isNotEmpty() && !got.equals(p.countryName, true) && !got.equals(p.country, true))
+                    // IchthysOS: by code, not English name (Mullvad says "USA", "UK").
+                    if (got.isNotEmpty() && !CountryNames.matches(got, p.country))
                         note = "IP country \"$got\", profile ${p.countryName}: the VPN exits elsewhere"
                 }
             }

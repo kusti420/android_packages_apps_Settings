@@ -50,9 +50,9 @@ data class SpoofProfile(
     val countryName: String
         get() = CountryProfiles.listed(country)?.name ?: Locale("", country).getDisplayCountry(Locale.ENGLISH).ifEmpty { country }
 
-    /** Configuration.mnc as the platform derives it (MccTable: "00" → MNC_ZERO, 0xFFFF). */
+    /** Configuration.mnc as the platform derives it (an MNC that parses to 0 → MNC_ZERO, 0xFFFF). */
     val configurationMnc: Int
-        get() = if (mnc == "00") 0xFFFF else mnc.toIntOrNull() ?: 0
+        get() = mnc.toIntOrNull().let { if (it == 0) 0xFFFF else it ?: 0 }
 
     /** The one Settings.Secure string, keys in the schema's order. */
     fun toJson(): String =
@@ -129,16 +129,34 @@ data class SpoofProfile(
             )
         }
 
-        /** The IANA zones of a country (android.icu), canonical ones first. */
-        fun timeZonesOf(country: String): List<String> =
+        /**
+         * The zones of a country: its default zone first, then the ones the time zone picker
+         * offers (tz data's country table). IchthysOS: ICU's list is alphabetical and includes
+         * aliases, so its first entry picked America/Adak for the US, Atlantic/Azores for
+         * Portugal and Asia/Calcutta for India; it remains the fallback.
+         */
+        fun timeZonesOf(country: String): List<String> {
+            val iso = country.uppercase(Locale.ROOT)
             try {
-                android.icu.util.TimeZone.getAvailableIDs(country.uppercase(Locale.ROOT))
-                    .toList()
-                    .filter { '/' in it }
-                    .distinct()
+                val ctz = com.android.i18n.timezone.TimeZoneFinder.getInstance()
+                    .lookupCountryTimeZones(iso.lowercase(Locale.ROOT))
+                if (ctz != null) {
+                    val now = java.time.Instant.now()
+                    val ids = (listOfNotNull(ctz.defaultTimeZoneId) +
+                        ctz.getEffectiveTimeZoneMappingsAt(now.toEpochMilli())
+                            .filter { it.isShownInPickerAt(now) }
+                            .map { it.timeZoneId }).distinct()
+                    if (ids.isNotEmpty()) return ids
+                }
+            } catch (e: RuntimeException) {
+                // fall back to ICU
+            }
+            return try {
+                android.icu.util.TimeZone.getAvailableIDs(iso).toList().filter { '/' in it }.distinct()
             } catch (e: RuntimeException) {
                 emptyList()
             }
+        }
 
         /** True for 3-digit MCC and 2–3-digit MNC strings. */
         fun validPlmn(mcc: String, mnc: String): Boolean =

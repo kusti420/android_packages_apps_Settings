@@ -61,6 +61,7 @@ import com.android.settings.ichthys.guard.backend.Health
 import com.android.settings.ichthys.guard.data.GuardRepository
 import com.android.settings.ichthys.guard.model.AlertType
 import com.android.settings.ichthys.guard.model.AppTag
+import com.android.settings.ichthys.guard.model.CountryNames
 import com.android.settings.ichthys.guard.model.CountryProfiles
 import com.android.settings.ichthys.guard.model.HostRules
 import com.android.settings.ichthys.guard.model.JournalKind
@@ -534,25 +535,7 @@ private data class IpCheck(
     /** True when the reported country is [iso]: by the exit server's code, the code, or the name. */
     fun matches(iso: String): Boolean {
         if (serverCode != null) return serverCode.equals(iso, true)
-        if (country.equals(iso, true)) return true
-        val name = norm(country)
-        // Mullvad's own short names ("USA", "UK") and spellings that differ from Java's
-        NAME_ALIASES[name]?.let { return it.equals(iso, true) }
-        if (name == norm(Locale("", iso).getDisplayCountry(Locale.ENGLISH))) return true
-        val code = Locale.getISOCountries().firstOrNull { norm(Locale("", it).getDisplayCountry(Locale.ENGLISH)) == name }
-        return code != null && code.equals(iso, true)
-    }
-
-    private companion object {
-        fun norm(s: String) = s.lowercase(Locale.ROOT).replace("&", "and").replace(Regex("[^a-z]"), "")
-
-        val NAME_ALIASES = mapOf(
-            "usa" to "US", "unitedstatesofamerica" to "US", "uk" to "GB", "greatbritain" to "GB",
-            "uae" to "AE", "czechrepublic" to "CZ", "southkorea" to "KR", "russia" to "RU",
-            "hongkong" to "HK", "macau" to "MO", "turkey" to "TR", "turkiye" to "TR",
-            "vietnam" to "VN", "macedonia" to "MK", "northmacedonia" to "MK", "ivorycoast" to "CI",
-            "burma" to "MM", "palestine" to "PS", "vatican" to "VA", "taiwan" to "TW",
-        )
+        return CountryNames.matches(country, iso)
     }
 }
 
