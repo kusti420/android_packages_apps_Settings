@@ -29,7 +29,10 @@ enum class LocationMode(val label: String) {
     REAL("Real"),
     /** On neither list: the fake place while it is on, the real position otherwise. */
     FAKE("Fake place"),
-    /** On ichthys_location_nofix_pkgs: never a fix, as if indoors; scans find nothing. */
+    /**
+     * On ichthys_location_nofix_pkgs: never a fix, as if indoors; Bluetooth, Wi-Fi and cell
+     * scans find nothing and there is no cell tower information.
+     */
     NONE("None"),
 }
 
@@ -43,7 +46,10 @@ enum class ScreenOffMode(val label: String) {
     STAY_ONLINE("Stay online"),
 }
 
-/** IchthysOS: what Wi-Fi and Bluetooth scans return to the app. */
+/**
+ * IchthysOS: what Bluetooth, Wi-Fi and cell scans return to the app (EMPTY: scans find nothing and
+ * no cell tower information, as IchthysShields.SCANS).
+ */
 enum class ScanMode(val label: String) {
     REAL("Real"),
     EMPTY("Empty"),

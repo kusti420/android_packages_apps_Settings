@@ -67,6 +67,7 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
@@ -90,6 +91,7 @@ import com.android.settings.ichthys.guard.model.Recommendation
 import com.android.settings.ichthys.guard.model.TrackerBlockLevel
 import com.android.settings.ichthys.guard.model.AppPreset
 import com.android.settings.ichthys.guard.model.JournalKind
+import com.android.settings.ichthys.guard.os.PickedContacts
 import com.android.settings.ichthys.guard.ui.theme.Guard
 import com.android.settings.ichthys.guard.ui.theme.GuardTheme
 import kotlinx.coroutines.Dispatchers
@@ -131,6 +133,10 @@ class FirstLaunchActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        // IchthysOS: no app's overlay over the review (its Full access confirmation included).
+        lifecycle.addObserver(
+            com.android.settingslib.core.lifecycle.HideNonSystemOverlayMixin(this)
+        )
         val pkg = intent?.getStringExtra(Intent.EXTRA_PACKAGE_NAME)
         val user = intent?.getParcelableExtra(Intent.EXTRA_USER, UserHandle::class.java)
         // SuspendedAppActivity starts us in the suspending user, which is the app's user; anything
@@ -251,6 +257,9 @@ class FirstLaunchActivity : ComponentActivity() {
             return
         }
         launch?.let { startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        // IchthysOS: a picked-contacts preset (Messenger) opens the picker over the app.
+        if (choice == SheetChoice.APPLY && preset?.spec?.contactsPicked == true)
+            PickedContacts.openPickerAfterPreset(this, pkg)
         finish()
     }
 
@@ -330,7 +339,18 @@ private fun loadSheet(ctx: Context, pkg: String): SheetData? {
     val ai = pi.applicationInfo ?: return null
     val repo = GuardRepository.get(ctx)
     val requested = pi.requestedPermissions.orEmpty().toSet()
-    val facts = AppFacts(pkg, repo.backend.getScan(pkg), requested, isBrowser(pm, pkg))
+    // IchthysOS: T1: an incomplete scan that found nothing is "unknown" (knownTrackers null),
+    // so the advisor keeps the default instead of reading it as "no trackers".
+    val scan = repo.backend.getScanInfo(pkg)
+    val facts =
+        AppFacts(
+            pkg,
+            scan?.knownTrackers,
+            requested,
+            isBrowser(pm, pkg),
+            scanIncomplete = scan?.complete == false,
+            loadsCodeAtRuntime = scan?.loadsCodeAtRuntime == true,
+        )
     val iconPx = (48 * ctx.resources.displayMetrics.density).toInt()
     return SheetData(
         repo,
@@ -399,7 +419,7 @@ private fun FirstLaunchSheet(
         }
     var busy by remember { mutableStateOf(false) }
     // IchthysOS: the preset the main button applies; starts at the recommendation's.
-    var preset by remember { mutableStateOf<AppPreset?>(null) }
+    var preset by rememberSaveable { mutableStateOf<AppPreset?>(null) }
     val scope = rememberCoroutineScope()
     val noRipple = remember { MutableInteractionSource() }
 
@@ -436,7 +456,7 @@ private fun FirstLaunchSheet(
                             color = t.muted,
                         )
                     } else {
-                        TrackersCard(s.facts.trackers)
+                        TrackersCard(s.facts.trackers, s.facts.scanIncomplete, s.facts.loadsCodeAtRuntime)
                         PermissionsCard(s.facts.usesInternet, s.groups)
                         val chosen = preset ?: s.recommendation.preset
                         PresetCard(chosen) { preset = it }
@@ -518,10 +538,19 @@ private fun Header(s: SheetData?, pkg: String) {
 }
 
 @Composable
-private fun TrackersCard(trackers: List<String>?) {
+private fun TrackersCard(
+    trackers: List<String>?,
+    incomplete: Boolean = false,
+    loadsCodeAtRuntime: Boolean = false,
+) {
     val t = Guard.tokens
     GuardCard(title = stringResource(R.string.ichthys_guard_first_launch_section_trackers)) {
         when {
+            trackers == null && incomplete ->
+                Text(
+                    stringResource(R.string.ichthys_guard_first_launch_scan_incomplete),
+                    style = MaterialTheme.typography.titleMedium,
+                )
             trackers == null ->
                 Text(
                     stringResource(R.string.ichthys_guard_first_launch_scan_pending),
@@ -546,7 +575,27 @@ private fun TrackersCard(trackers: List<String>?) {
                     style = MaterialTheme.typography.bodySmall,
                     color = t.muted,
                 )
+                if (incomplete)
+                    Text(
+                        stringResource(R.string.ichthys_guard_first_launch_scan_incomplete_more),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = t.muted,
+                    )
             }
+        }
+        // IchthysOS: T1: code the scan can't see.
+        if (loadsCodeAtRuntime) {
+            Text(
+                stringResource(R.string.ichthys_guard_first_launch_runtime_code),
+                style = MaterialTheme.typography.titleMedium,
+                color = t.danger,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+            Text(
+                stringResource(R.string.ichthys_guard_first_launch_runtime_code_text),
+                style = MaterialTheme.typography.bodySmall,
+                color = t.muted,
+            )
         }
     }
 }

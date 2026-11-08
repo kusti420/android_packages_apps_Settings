@@ -6343,6 +6343,21 @@
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:launchMode="singleTop" />
 
+        <!-- IchthysOS Guard: an app's Guard page (Intent.EXTRA_PACKAGE_NAME) for the permission
+             dialog's "More in Guard" link. GuardActivity itself stays unexported; this alias is
+             exported only behind GRANT_RUNTIME_PERMISSIONS (signature|installer), like the
+             contacts picker, so ordinary apps can't open it. -->
+        <activity-alias
+            android:name=".ichthys.guard.ui.GuardAppPageAlias"
+            android:targetActivity=".ichthys.guard.ui.GuardActivity"
+            android:exported="true"
+            android:permission="android.permission.GRANT_RUNTIME_PERMISSIONS">
+            <intent-filter>
+                <action android:name="com.android.settings.ichthys.guard.action.APP_PAGE" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity-alias>
+
         <!-- IchthysOS Guard first-launch review, Customize: the quarantined app's Guard page in
              review mode (GuardReviewActivity extends GuardActivity). Its own task (empty
              affinity, started with NEW_TASK|MULTIPLE_TASK by FirstLaunchActivity), so nothing
@@ -6375,6 +6390,25 @@
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden">
             <intent-filter>
                 <action android:name="android.intent.action.SHOW_SUSPENDED_APP_DETAILS" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <!-- IchthysOS Guard: picks the contacts an app in "picked" mode reads. Exported only for
+             the permission dialog's "Allow with picked contacts": GRANT_RUNTIME_PERMISSIONS
+             (signature|installer) keeps every ordinary app out. -->
+        <activity
+            android:name=".ichthys.guard.ui.ContactsPickerActivity"
+            android:label="@string/ichthys_guard_title"
+            android:theme="@style/Theme.IchthysGuard"
+            android:exported="true"
+            android:permission="android.permission.GRANT_RUNTIME_PERMISSIONS"
+            android:directBootAware="false"
+            android:taskAffinity=""
+            android:excludeFromRecents="true"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden">
+            <intent-filter>
+                <action android:name="com.android.settings.ichthys.guard.action.PICK_CONTACTS" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>

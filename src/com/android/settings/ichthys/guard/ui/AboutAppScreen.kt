@@ -41,6 +41,7 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -65,6 +66,8 @@ private data class ScanResult(
     val trackers: List<String>?,
     val local: LocalScan?,
     val usage: List<OpUsage>?,
+    /** IchthysOS: the scan's completeness and run-time code flags; null while unknown. */
+    val info: com.android.settings.ichthys.guard.backend.ScanInfo? = null,
 )
 
 /**
@@ -90,10 +93,12 @@ fun AboutAppScreen(vm: GuardViewModel, nav: GuardNav, packageName: String, modif
             value = null
             value =
                 withContext(Dispatchers.IO) {
+                    val info = repo.backend.getScanInfo(packageName)
                     ScanResult(
-                        repo.backend.getScan(packageName),
+                        info?.knownTrackers,
                         repo.inspector.localScan(packageName),
                         app?.let { repo.inspector.permissionUsage(it) },
+                        info,
                     )
                 }
         }
@@ -102,11 +107,11 @@ fun AboutAppScreen(vm: GuardViewModel, nav: GuardNav, packageName: String, modif
             value = repo.riskFacts.value[packageName]
             if (value == null) value = withContext(Dispatchers.IO) { repo.riskFactsFor(packageName) }
         }
-    var confirmReset by remember { mutableStateOf(false) }
+    var confirmReset by rememberSaveable { mutableStateOf(false) }
     var resetMessage by remember { mutableStateOf<String?>(null) }
     // IchthysOS: cutting the network is confirmed first, and a fix applied here stays in the row
     // as done, so the tap has visible feedback (the score changing alone says little).
-    var confirmBlock by remember { mutableStateOf(false) }
+    var confirmBlock by rememberSaveable { mutableStateOf(false) }
     var applied by remember { mutableStateOf(setOf<RiskFix>()) }
     fun update(change: (com.android.settings.ichthys.guard.model.AppPolicy) -> com.android.settings.ichthys.guard.model.AppPolicy) =
         repo.updatePolicy(packageName, change)
@@ -164,17 +169,27 @@ fun AboutAppScreen(vm: GuardViewModel, nav: GuardNav, packageName: String, modif
                     Text("Scanning…", color = t.muted)
                 } else {
                     val trackers = s.trackers
+                    val incomplete = s.info?.complete == false
                     Text(
                         when {
+                            // IchthysOS: T1: part of the code couldn't be read: unknown, not clean.
+                            trackers == null && incomplete -> "Trackers unknown: the scan couldn't read all of this app's code"
                             trackers == null && status.live -> "Tracker scan not finished yet"
                             trackers == null -> "Tracker scan unavailable: the Guard service isn't reachable"
                             trackers.isEmpty() -> "No known tracker SDKs embedded"
+                            incomplete -> "At least ${quantity(trackers.size, "tracker SDK")} embedded"
                             else -> "${quantity(trackers.size, "tracker SDK")} embedded"
                         },
                         style = MaterialTheme.typography.titleMedium,
                     )
                     if (!trackers.isNullOrEmpty())
                         Text(trackers.joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = t.muted)
+                    if (incomplete && !trackers.isNullOrEmpty())
+                        Text("The scan couldn't read all of the code, so there may be more.", style = MaterialTheme.typography.bodySmall, color = t.muted)
+                    if (s.info?.loadsCodeAtRuntime == true) {
+                        Text("Loads code at runtime", style = MaterialTheme.typography.titleMedium, color = t.danger, modifier = Modifier.padding(top = 8.dp))
+                        Text("It ships code as data or uses a dex class loader: code it downloads or unpacks later is never scanned, trackers included.", style = MaterialTheme.typography.bodySmall, color = t.muted)
+                    }
                     s.local?.let { l ->
                         Text("${quantity(l.dangerousPermissions.size, "dangerous permission")} requested", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 8.dp))
                         if (l.dangerousPermissions.isNotEmpty())

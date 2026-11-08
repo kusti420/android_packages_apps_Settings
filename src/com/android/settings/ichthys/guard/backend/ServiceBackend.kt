@@ -115,8 +115,8 @@ class ServiceBackend : GuardBackend {
         awaitClose { call(Unit) { it.unregisterListener(listener) } }
     }
 
-    override fun getScan(packageName: String): List<String>? =
-        call(null) { it.getScan(packageName)?.filterNotNull() }
+    override fun getScanInfo(packageName: String): ScanInfo? =
+        call(null) { it.getScan(packageName)?.filterNotNull() }?.let { ScanInfo.parse(it) }
 
     override fun pauseEnforcement(minutes: Int) =
         write { it.pauseEnforcement(if (minutes <= 0) 0 else minutes.coerceAtMost(1440)) }

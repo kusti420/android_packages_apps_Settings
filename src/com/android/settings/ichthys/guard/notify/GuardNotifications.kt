@@ -289,10 +289,13 @@ object GuardNotifications {
         val i =
             Intent(ctx, GuardActivity::class.java)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-        if (pkg != null) i.putExtra(EXTRA_OPEN_PACKAGE, pkg)
+        // IchthysOS: the package rides in the data URI, which PendingIntent matching compares:
+        // two apps whose names share a hashCode used to get one PendingIntent, and
+        // FLAG_UPDATE_CURRENT retargeted the other app's buttons.
+        if (pkg != null) i.putExtra(EXTRA_OPEN_PACKAGE, pkg).setData(packageUri(pkg))
         return PendingIntent.getActivity(
             ctx,
-            pkg?.hashCode() ?: 0,
+            0,
             i,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
@@ -301,14 +304,36 @@ object GuardNotifications {
     private fun actionIntent(ctx: Context, action: String, pkg: String): PendingIntent =
         PendingIntent.getBroadcast(
             ctx,
-            (action + pkg).hashCode(),
+            0,
             Intent(ctx, NotificationActionReceiver::class.java)
                 .setAction(action)
+                .setData(packageUri(pkg))
                 .putExtra(EXTRA_PACKAGE, pkg),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
-    private fun notificationId(pkg: String) = 1000 + (pkg.hashCode() and 0xFFFFFF)
+    private fun packageUri(pkg: String): android.net.Uri = android.net.Uri.fromParts("package", pkg, null)
+
+    /**
+     * IchthysOS: per-app notifications are told apart by their tag (the package name), with one
+     * fixed id per kind; the id used to be derived from pkg.hashCode(), so a colliding name
+     * replaced another app's alert.
+     */
+    private const val NEW_APP_ID = 1000
+
+    private fun notifyTagged(ctx: Context, tag: String, id: Int, n: Notification) =
+        ctx.getSystemService(NotificationManager::class.java).notify(tag, id, n)
+
+    /** IchthysOS: removes every notification Guard posted about [pkg]. Any thread. */
+    fun cancelForPackage(ctx: Context, pkg: String) {
+        try {
+            val nm = ctx.getSystemService(NotificationManager::class.java)
+            nm.cancel(pkg, NEW_APP_ID)
+            for (type in AlertType.entries) nm.cancel("$pkg|${type.name}", ALERT_ID_BASE)
+        } catch (e: RuntimeException) {
+            Log.w(TAG, "could not clear the notifications of $pkg", e)
+        }
+    }
 
     /**
      * "X installed · N trackers · Shielded" with Block network / Strict actions. Call off the main
@@ -328,19 +353,24 @@ object GuardNotifications {
             } catch (ignored: PackageManager.NameNotFoundException) {
                 return
             }
-        val scan =
+        val info =
             try {
-                repo.backend.getScan(pkg)
+                repo.backend.getScanInfo(pkg)
             } catch (ignored: RuntimeException) {
                 null
             }
+        // IchthysOS: T1: an incomplete scan is "trackers unknown", never "0 trackers".
+        val scan = info?.knownTrackers
         val trackers = scan.orEmpty()
         val scanText =
-            if ((repo.backend.isLive && scan != null) || trackers.isNotEmpty()) {
-                "${trackers.size} tracker${if (trackers.size == 1) "" else "s"}"
+            (if (info != null && info.knownTrackers == null) {
+                "trackers unknown"
+            } else if ((repo.backend.isLive && scan != null) || trackers.isNotEmpty()) {
+                (if (info?.complete == false) "at least " else "") +
+                    "${trackers.size} tracker${if (trackers.size == 1) "" else "s"}"
             } else {
                 "scan pending"
-            }
+            }) + if (info?.loadsCodeAtRuntime == true) " · loads code at runtime" else ""
         // What the OS shields actually are right now (each can be switched off in Guard).
         val resolver = ctx.contentResolver
         val locked =
@@ -390,7 +420,7 @@ object GuardNotifications {
         }
         val n = builder.build()
         ensureChannels(ctx)
-        ctx.getSystemService(NotificationManager::class.java).notify(notificationId(pkg), n)
+        notifyTagged(ctx, pkg, NEW_APP_ID, n)
     }
 
     /** Replaces the new-app notification with a confirmation after an action. */
@@ -406,7 +436,7 @@ object GuardNotifications {
                 .setTimeoutAfter(15_000)
                 .build()
         ensureChannels(ctx)
-        ctx.getSystemService(NotificationManager::class.java).notify(notificationId(pkg), n)
+        notifyTagged(ctx, pkg, NEW_APP_ID, n)
     }
 
     /**
@@ -437,11 +467,9 @@ object GuardNotifications {
                 .setAutoCancel(true)
                 .build()
         ensureChannels(ctx)
-        ctx.getSystemService(NotificationManager::class.java)
-            .notify(ALERT_ID_BASE + ((pkg + type.name).hashCode() and 0xFFFFFF), n)
+        notifyTagged(ctx, "$pkg|${type.name}", ALERT_ID_BASE, n)
     }
 
-    private fun reviewNotificationId(pkg: String) = REVIEW_ID_BASE + (pkg.hashCode() and 0xFFFFFF)
 
     /**
      * IchthysOS: a quarantined app's first-launch review was closed without a choice. Silent (it
@@ -455,8 +483,8 @@ object GuardNotifications {
         val review =
             PendingIntent.getActivity(
                 ctx,
-                reviewNotificationId(pkg),
-                FirstLaunchActivity.reviewIntent(ctx, pkg),
+                0,
+                FirstLaunchActivity.reviewIntent(ctx, pkg).setData(packageUri(pkg)),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
         val text = ctx.getString(R.string.ichthys_guard_review_unfinished_text)
@@ -472,13 +500,13 @@ object GuardNotifications {
                 .setAutoCancel(true)
                 .build()
         ensureChannels(ctx)
-        ctx.getSystemService(NotificationManager::class.java).notify(reviewNotificationId(pkg), n)
+        notifyTagged(ctx, pkg, REVIEW_ID_BASE, n)
     }
 
     /** IchthysOS: removes [notifyReviewUnfinished]'s notification of [pkg], if any. Any thread. */
     fun cancelReviewUnfinished(ctx: Context, pkg: String) {
         try {
-            ctx.getSystemService(NotificationManager::class.java).cancel(reviewNotificationId(pkg))
+            ctx.getSystemService(NotificationManager::class.java).cancel(pkg, REVIEW_ID_BASE)
         } catch (e: RuntimeException) {
             Log.w(TAG, "could not clear the review notice of $pkg", e)
         }

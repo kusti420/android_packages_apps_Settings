@@ -29,11 +29,14 @@ class PolicyStore(dir: File) {
         try {
             PolicySet.fromJson(String(file.readFully(), Charsets.UTF_8))
         } catch (ignored: IOException) {
+            // IchthysOS: no file is a fresh start; a file that exists but can't be read is not.
+            if (file.baseFile.exists()) unreadable = true
             PolicySet()
         } catch (e: IllegalArgumentException) {
             // A file this build can't read (an option renamed or removed since it was saved):
             // keep a copy before the defaults replace it on the next save.
             keepUnreadable()
+            unreadable = true
             PolicySet()
         }
 
@@ -46,6 +49,27 @@ class PolicyStore(dir: File) {
             file.failWrite(out)
             throw e
         }
+    }
+
+    /**
+     * IchthysOS: the last load found a file it couldn't read and fell back to the defaults
+     * (everything allowed). Guard then must not push those defaults over the service's table.
+     */
+    @Volatile
+    var unreadable: Boolean = false
+        private set
+
+    /** IchthysOS: a copy of an unreadable file is waiting for the owner's decision. */
+    fun hasUnreadableCopy(): Boolean = File(file.baseFile.path + ".unreadable").exists()
+
+    /**
+     * IchthysOS: the owner chose the defaults (or imported a backup): the copy is kept aside
+     * under another name and the store counts as readable again.
+     */
+    fun acknowledgeUnreadable() {
+        val bad = File(file.baseFile.path + ".unreadable")
+        if (bad.exists()) bad.renameTo(File(file.baseFile.path + ".unreadable.kept"))
+        unreadable = false
     }
 
     private fun keepUnreadable() {

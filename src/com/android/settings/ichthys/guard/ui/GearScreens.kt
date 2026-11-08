@@ -52,6 +52,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -228,9 +229,9 @@ private fun SpoofedValuesPage(vm: GuardViewModel, nav: GuardNav, modifier: Modif
     val apps by repo.apps.collectAsStateWithLifecycle()
     val journal by repo.journal.collectAsStateWithLifecycle()
     val lastFake = remember(journal) { journal.entries.lastOrNull { it.shield == com.android.settings.ichthys.guard.model.ShieldProof.LOCATION_FAKE } }
-    var searching by remember { mutableStateOf(false) }
+    var searching by rememberSaveable { mutableStateOf(false) }
     // Which editor is open: "country", "tz", "carrier", "custom", "locale", "sales" or null.
-    var editing by remember { mutableStateOf<String?>(null) }
+    var editing by rememberSaveable { mutableStateOf<String?>(null) }
     var ipResult by remember { mutableStateOf<String?>(null) }
     var ipMismatch by remember { mutableStateOf(false) }
     var ipChecking by remember { mutableStateOf(false) }
@@ -646,9 +647,9 @@ private fun TextDialog(
 @Composable
 private fun CustomCarrierDialog(p: SpoofProfile, onSave: (String, String, String) -> Unit, onDismiss: () -> Unit) {
     val t = Guard.tokens
-    var name by remember { mutableStateOf(p.operator) }
-    var mcc by remember { mutableStateOf(p.mcc) }
-    var mnc by remember { mutableStateOf(p.mnc) }
+    var name by rememberSaveable { mutableStateOf(p.operator) }
+    var mcc by rememberSaveable { mutableStateOf(p.mcc) }
+    var mnc by rememberSaveable { mutableStateOf(p.mnc) }
     val ok = name.isNotBlank() && SpoofProfile.validPlmn(mcc.trim(), mnc.trim())
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -977,6 +978,23 @@ private fun HealthPage(vm: GuardViewModel, nav: GuardNav, modifier: Modifier) {
                 KeyValue("Events in memory", "${events.size}")
                 if (!status.live)
                     Text("Without the service no live traffic is shown and network rules, lockdown and pause aren't enforced. Rules are saved and sent at the next restart or change. The data shields don't depend on it.", style = MaterialTheme.typography.bodySmall, color = t.muted, modifier = Modifier.padding(top = 8.dp))
+            }
+        }
+        // IchthysOS: G6: Guard's own saved settings were unreadable; nothing replaces the
+        // service's table until the owner decides here (or imports a backup).
+        if (status.storesUnreadable) {
+            item {
+                val healthScope = rememberCoroutineScope()
+                GuardCard(title = "Saved settings unreadable") {
+                    Text(
+                        "Guard couldn't read its saved app settings or rules (a copy was kept). Until you decide, the firewall keeps the rules it already had and Guard sends no new tables, so lockdown, schedules and new apps' rules don't change it. Import a backup (Gear › Backup), or start over with the defaults: every app Shielded, no custom rules.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = t.muted,
+                    )
+                    TextButton(onClick = { healthScope.launch(Dispatchers.IO) { repo.acceptDefaultsAfterUnreadable() } }) {
+                        Text("Use the defaults", color = t.danger)
+                    }
+                }
             }
         }
         if (failures.isNotEmpty()) {

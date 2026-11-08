@@ -92,6 +92,15 @@ fun QuietNotificationsScreen(
                 style = MaterialTheme.typography.bodySmall,
                 color = t.muted,
             )
+            // IchthysOS: tidiness, not privacy: the platform still hands every notification to
+            // apps with notification access, folded or hidden alike.
+            Text(
+                "This only changes how the shade looks; it protects nothing. Folded and hidden " +
+                    "notifications still reach every app with notification access.",
+                style = MaterialTheme.typography.bodySmall,
+                color = t.muted,
+                modifier = Modifier.padding(top = 4.dp),
+            )
         }
         item {
             GuardCard(title = "Fold ongoing") {
@@ -244,7 +253,8 @@ fun QuietNotificationsScreen(
             item {
                 GuardCard(title = "Hidden") {
                     Text(
-                        "Folded notifications you hid for good with a long-press on their chip.",
+                        "Folded notifications you hid for good with a long-press on their chip. " +
+                            "Hidden from the shade only: apps with notification access still get them.",
                         style = MaterialTheme.typography.bodySmall,
                         color = t.muted,
                     )

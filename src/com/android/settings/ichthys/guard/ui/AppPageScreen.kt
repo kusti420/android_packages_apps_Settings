@@ -42,6 +42,7 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -58,6 +59,7 @@ import com.android.settings.ichthys.guard.model.NetworkAccess
 import com.android.settings.ichthys.guard.model.PresetControl
 import com.android.settings.ichthys.guard.model.ScanMode
 import com.android.settings.ichthys.guard.model.ScreenOffMode
+import com.android.settings.ichthys.guard.os.PickedContacts
 import com.android.settings.ichthys.guard.os.ShieldGroup
 import com.android.settings.ichthys.guard.os.ShieldTable
 import com.android.settings.ichthys.guard.ui.theme.Guard
@@ -121,15 +123,17 @@ fun AppPageScreen(
             kotlinx.coroutines.delay(400) // the behaviour push is asynchronous
             value = app?.let { a -> withContext(Dispatchers.IO) { repo.backend.isLanDenied(a.uid) } }
         }
-    var confirmPreset by remember { mutableStateOf<AppPreset?>(null) }
+    var confirmPreset by rememberSaveable { mutableStateOf<AppPreset?>(null) }
     // IchthysOS: the Full access preset asks twice (FullAccessConfirmation) and grants permissions.
-    var confirmFullAccess by remember { mutableStateOf(false) }
+    var confirmFullAccess by rememberSaveable { mutableStateOf(false) }
     val fullAccessGrants =
         remember(version, policy.preset) {
             if (policy.preset == AppPreset.FULL_ACCESS)
                 com.android.settings.ichthys.guard.data.FullAccessGranter.recorded(repo.contextForLists(), packageName)?.count ?: 0
             else 0
         }
+    val leftoverGrants =
+        remember(version, policy.preset, packageName) { repo.leftoverFullAccessGrants(packageName) }
     fun update(change: (AppPolicy) -> AppPolicy) = repo.updatePolicy(packageName, change)
     fun changed() {
         version++
@@ -182,7 +186,13 @@ fun AppPageScreen(
                     for (p in offered) {
                         Chip(p.label, policy.preset == p) {
                             when {
-                                p == AppPreset.CUSTOM -> repo.applyPreset(packageName, AppPreset.CUSTOM)
+                                // IchthysOS: off the main thread: leaving Full access for Custom
+                                // takes its grants back (binder calls).
+                                p == AppPreset.CUSTOM ->
+                                    scope.launch(Dispatchers.IO) {
+                                        repo.applyPreset(packageName, AppPreset.CUSTOM)
+                                        withContext(Dispatchers.Main) { changed() }
+                                    }
                                 p.requiresDoubleConfirmation -> if (policy.preset != p) confirmFullAccess = true
                                 else -> confirmPreset = p
                             }
@@ -198,12 +208,32 @@ fun AppPageScreen(
                 )
                 if (policy.preset == AppPreset.FULL_ACCESS) {
                     Text(
-                        if (fullAccessGrants > 0) "Guard granted ${quantity(fullAccessGrants, "permission")} for this; picking another preset takes them back."
+                        if (fullAccessGrants > 0) "Guard granted ${quantity(fullAccessGrants, "permission")} for this; picking another preset, Custom included, takes them back."
                         else "Every permission it asks for was granted already; nothing is shielded.",
                         style = MaterialTheme.typography.bodySmall,
                         color = t.muted,
                         modifier = Modifier.padding(top = 4.dp),
                     )
+                }
+                // IchthysOS: grants Full access left behind on another preset (an app moved to
+                // Custom before Custom took them back): shown, with an explicit way out.
+                if (leftoverGrants > 0) {
+                    Text(
+                        "Full access still holds ${quantity(leftoverGrants, "permission")} it granted this app.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = t.danger,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                    TextButton(
+                        onClick = {
+                            scope.launch(Dispatchers.IO) {
+                                repo.revokeFullAccess(packageName)
+                                withContext(Dispatchers.Main) { changed() }
+                            }
+                        }
+                    ) {
+                        Text("Take back Full access", color = t.danger)
+                    }
                 }
                 if (quarantined) {
                     Text(
@@ -335,10 +365,10 @@ fun AppPageScreen(
                         LocationMode.FAKE ->
                             if (fakeOn) "Gets the fake place instead of your position, with its country, carrier and time zone; Wi-Fi, cell and Bluetooth scans come back empty."
                             else "The fake place is off (Guard settings › Spoofed values), so this app gets your real position."
-                        LocationMode.NONE -> "Never gets a fix, as if indoors; scans find nothing."
+                        LocationMode.NONE -> "Never gets a fix, as if indoors; Bluetooth, Wi-Fi and cell scans find nothing and there is no cell tower information."
                     }
                 )
-                ControlLabel("Wi-Fi & Bluetooth scans", PresetControl.SCANS in differs, Modifier.padding(top = 12.dp))
+                ControlLabel("Bluetooth, Wi-Fi & cell scans", PresetControl.SCANS in differs, Modifier.padding(top = 12.dp))
                 Segmented(
                     ScanMode.entries,
                     if (controls.location == LocationMode.NONE) ScanMode.EMPTY else controls.scans,
@@ -348,6 +378,8 @@ fun AppPageScreen(
                 )
                 if (controls.location == LocationMode.NONE)
                     Note("Empty while location is None.")
+                else if (controls.scans == ScanMode.EMPTY)
+                    Note("Bluetooth, Wi-Fi and cell scans find nothing, and no cell tower information.")
                 val personal = remember(version, tick, packageName) { sheetSummary(repo, packageName, ShieldGroup.PERSONAL, app?.isSystem == true) }
                 val device = remember(version, tick, packageName) { sheetSummary(repo, packageName, ShieldGroup.DEVICE, app?.isSystem == true) }
                 val radio = remember(version, tick, packageName) { sheetSummary(repo, packageName, ShieldGroup.RADIO, app?.isSystem == true) }
@@ -461,6 +493,8 @@ fun AppPageScreen(
                             repo.applyPreset(packageName, preset)
                             if (leavingFull) repo.revokeFullAccess(packageName)
                             if (quarantined && !firstLaunchReview) releaseQuarantine(repo, packageName)
+                            // IchthysOS: a picked-contacts preset (Messenger) opens the picker.
+                            if (preset.spec?.contactsPicked == true) PickedContacts.openPickerAfterPreset(context, packageName)
                         }
                         changed()
                     }

@@ -88,8 +88,9 @@ class GuardViewModel(app: Application) : AndroidViewModel(app) {
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val status: StateFlow<Status> =
-        combine(repo.pausedUntil, repo.rules, repo.osWritable, repo.health) { p, r, w, h ->
-                Status(p, r.lockdown.enabled, w, h != Health.UNREACHABLE && repo.backend.isLive, h)
+        combine(repo.pausedUntil, repo.rules, repo.osWritable, repo.health, repo.storesUnreadable) {
+                p, r, w, h, u ->
+                Status(p, r.lockdown.enabled, w, h != Health.UNREACHABLE && repo.backend.isLive, h, u)
             }
             .stateIn(
                 viewModelScope,
@@ -104,6 +105,8 @@ class GuardViewModel(app: Application) : AndroidViewModel(app) {
         val live: Boolean,
         /** IIchthysGuard.HEALTH_* bits, or Health.UNREACHABLE. */
         val health: Int,
+        /** IchthysOS: Guard's own saved settings couldn't be read (GuardRepository.storesUnreadable). */
+        val storesUnreadable: Boolean = false,
     ) {
         /** The red card's lines; empty when everything works. */
         val problems: List<String>
@@ -113,6 +116,8 @@ class GuardViewModel(app: Application) : AndroidViewModel(app) {
                     else addAll(Health.problems(health).filter { !it.contains("tracker database") })
                     if (!osWritable)
                         add("Settings couldn't write the shield settings (WRITE_SECURE_SETTINGS denied)")
+                    if (storesUnreadable)
+                        add("Guard's saved settings couldn't be read: the firewall keeps its last rules and Guard doesn't send new tables until you import a backup or accept the defaults (Service health)")
                 }
     }
 

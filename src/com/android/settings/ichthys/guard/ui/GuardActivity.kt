@@ -103,6 +103,11 @@ open class GuardActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        // IchthysOS: no app's overlay over Guard (stock Settings pages do the same): one could
+        // cover a Full access confirmation's text and leave its button exposed.
+        lifecycle.addObserver(
+            com.android.settingslib.core.lifecycle.HideNonSystemOverlayMixin(this)
+        )
         // IchthysOS: Guard's firewall table is device-wide and belongs to the system user; another
         // user's or profile's Guard would replace the owner's rules (GuardRepository.isGuardUser).
         if (!GuardRepository.isGuardUser()) {

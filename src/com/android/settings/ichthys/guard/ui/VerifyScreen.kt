@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -40,6 +41,7 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -78,7 +80,7 @@ fun VerifyScreen(vm: GuardViewModel, nav: GuardNav, forPackage: String?, modifie
     // confirmations), so no check is ever "not tested: needs a permission".
     val policies by repo.policies.collectAsStateWithLifecycle()
     val probeFull = policies.policyFor(PROBE).preset == AppPreset.FULL_ACCESS
-    var confirmFullAccess by remember { mutableStateOf(false) }
+    var confirmFullAccess by rememberSaveable { mutableStateOf(false) }
     // A per-app page shows that app's runs only, never a general run under its header.
     val shown: VerifyRun? =
         running?.takeIf { !it.done }
@@ -104,6 +106,15 @@ fun VerifyScreen(vm: GuardViewModel, nav: GuardNav, forPackage: String?, modifie
                     developerNote = "Build it with `m IchthysProbe IchthysProbeHelper` and install both with adb as user apps. Never put it into /system: a system app is exempt from the shields, so the results would be wrong.",
                 )
             }
+        } else if (!probe.genuine) {
+            // IchthysOS: an app under the tester's name but not signed with the probe key.
+            item {
+                Warn(
+                    "This IchthysProbe isn't the IchthysOS tester",
+                    "An app named org.ichthys.probe is installed, but it isn't signed with the IchthysOS probe key. Guard doesn't run it, give it presets or Full access.",
+                    developerNote = "Re-sign the build with packages/apps/IchthysProbe/tools/sign_probe.sh (key ~/.android-certs/ichthys_probe) and install it again with adb install -r. A testkey build is refused.",
+                )
+            }
         } else if (probe.inSystem) {
             item {
                 Warn(
@@ -119,7 +130,7 @@ fun VerifyScreen(vm: GuardViewModel, nav: GuardNav, forPackage: String?, modifie
                 )
             }
         }
-        if (probe.installed && !probe.inSystem) {
+        if (probe.installed && probe.genuine && !probe.inSystem) {
             item {
                 GuardCard(title = "Tester app") {
                     ToggleRow(
@@ -166,7 +177,7 @@ fun VerifyScreen(vm: GuardViewModel, nav: GuardNav, forPackage: String?, modifie
                             }
                     }
                 },
-                enabled = !busy && probe.installed && !probe.quarantined,
+                enabled = !busy && probe.installed && probe.genuine && !probe.quarantined,
                 modifier = Modifier.fillMaxWidth().height(56.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = t.accent, contentColor = t.onAccent),
             ) {
@@ -264,7 +275,7 @@ fun VerifyScreen(vm: GuardViewModel, nav: GuardNav, forPackage: String?, modifie
                             ctx.startActivity(it.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
                         }
                     },
-                    enabled = probe.installed,
+                    enabled = probe.installed && probe.genuine,
                 ) {
                     Text("Open IchthysProbe")
                 }
@@ -283,6 +294,46 @@ fun VerifyScreen(vm: GuardViewModel, nav: GuardNav, forPackage: String?, modifie
                 }
             }
         }
+    }
+
+    // IchthysOS: the tester's "Check everything" only asks; the run starts once the owner
+    // confirms here, on Guard's own screen (a run hands the tester presets for minutes).
+    val probeRequest by vm.verifier.probeRequest.collectAsStateWithLifecycle()
+    if (probeRequest != null && forPackage == null) {
+        AlertDialog(
+            onDismissRequest = {
+                scope.launch(Dispatchers.IO) { vm.verifier.answerProbeRequest(false) }
+            },
+            containerColor = t.raised,
+            titleContentColor = t.text,
+            textContentColor = t.muted,
+            title = { Text("Run Verify my protection?") },
+            text = {
+                Text(
+                    "IchthysProbe asked for a full verification. For a few minutes it then runs as a blocked app, a messenger (online during lockdown, fake place) and a maps app (real location, scans and sensors); its own setup comes back afterwards. Only confirm if you just pressed its button."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        message = null
+                        scope.launch(Dispatchers.IO) {
+                            val err = vm.verifier.answerProbeRequest(true)
+                            if (err != null) withContext(Dispatchers.Main) { message = err }
+                        }
+                    }
+                ) {
+                    Text("Run")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { scope.launch(Dispatchers.IO) { vm.verifier.answerProbeRequest(false) } }
+                ) {
+                    Text("Cancel")
+                }
+            },
+        )
     }
 
     if (confirmFullAccess) {

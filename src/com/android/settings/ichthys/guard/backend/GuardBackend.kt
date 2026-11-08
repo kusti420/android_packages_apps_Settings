@@ -29,6 +29,39 @@ data class UidRule(val access: NetworkAccess, val reason: BlockReason = BlockRea
 data class BlockedCounter(val count: Int, val lastMs: Long)
 
 /**
+ * IchthysOS: the install-time tracker scan with what it could not see. The platform appends
+ * markers to the tracker names (TrackerScanner.MARK_*): "ichthys:incomplete" when part of the code
+ * couldn't be read (oversized or broken dex, time budget, out of memory), "ichthys:runtime_code"
+ * when the app ships dex/jar files in its assets or references a run-time dex loader
+ * (DexClassLoader, InMemoryDexClassLoader): code the scan never sees.
+ */
+data class ScanInfo(
+    val trackers: List<String>,
+    val complete: Boolean,
+    val loadsCodeAtRuntime: Boolean,
+) {
+    /**
+     * The tracker names as far as they can be relied on: null when the scan was incomplete and
+     * found none ("unknown", never "no trackers"); what was found otherwise.
+     */
+    val knownTrackers: List<String>?
+        get() = if (!complete && trackers.isEmpty()) null else trackers
+
+    companion object {
+        const val MARK_PREFIX = "ichthys:"
+        const val MARK_INCOMPLETE = "ichthys:incomplete"
+        const val MARK_RUNTIME_CODE = "ichthys:runtime_code"
+
+        fun parse(raw: List<String>): ScanInfo =
+            ScanInfo(
+                trackers = raw.filter { !it.startsWith(MARK_PREFIX) },
+                complete = MARK_INCOMPLETE !in raw,
+                loadsCodeAtRuntime = MARK_RUNTIME_CODE in raw,
+            )
+    }
+}
+
+/**
  * Everything Guard needs from the platform service `ichthys_guard`
  * (com.android.internal.ichthys.guard.IIchthysGuard in frameworks/base). [ServiceBackend] is the
  * only implementation in Settings; the interface keeps the repository testable off-device (the
@@ -58,8 +91,14 @@ interface GuardBackend {
     /** Live batches of new events. Cold; collecting registers a listener. */
     fun liveEvents(): Flow<List<GuardEvent>>
 
-    /** Tracker names found by the install-time scan of [packageName]'s code; null if unknown. */
-    fun getScan(packageName: String): List<String>?
+    /**
+     * Tracker names found by the install-time scan of [packageName]'s code; null if unknown
+     * (still scanning, or IchthysOS: an incomplete scan that found none).
+     */
+    fun getScan(packageName: String): List<String>? = getScanInfo(packageName)?.knownTrackers
+
+    /** IchthysOS: the scan with its completeness and run-time code flags; null while unknown. */
+    fun getScanInfo(packageName: String): ScanInfo?
 
     /** Stops enforcement (monitoring continues) for [minutes] (1..1440); 0 resumes at once. */
     fun pauseEnforcement(minutes: Int)

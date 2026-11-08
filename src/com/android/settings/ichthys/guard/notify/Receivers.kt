@@ -53,9 +53,9 @@ class PackageAddedReceiver : BroadcastReceiver() {
 
 /**
  * IchthysOS: an app was uninstalled: drops its unfinished first-launch review mark and
- * notification. PACKAGE_FULLY_REMOVED is exempt from the implicit-broadcast limits, so this
- * manifest receiver runs even when Settings isn't; the repository is only started when the app
- * had a mark.
+ * notifications and everything Guard keyed by its name (GuardRepository.forgetPackage).
+ * PACKAGE_FULLY_REMOVED is exempt from the implicit-broadcast limits, so this manifest receiver
+ * runs even when Settings isn't.
  */
 class PackageRemovedReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
@@ -66,9 +66,12 @@ class PackageRemovedReceiver : BroadcastReceiver() {
         val pkg = intent.data?.schemeSpecificPart ?: return
         runAsync {
             GuardNotifications.cancelReviewUnfinished(context, pkg)
-            if (GuardRepository.hasUnfinishedReview(context, pkg)) {
-                GuardRepository.get(context).clearUnfinishedReview(pkg)
-            }
+            // IchthysOS: G4: its notifications, policy, Full access record and lockdown/screen-off
+            // exceptions go with it (the platform prunes the OS allow lists itself).
+            GuardNotifications.cancelForPackage(context, pkg)
+            val repo = GuardRepository.get(context)
+            if (GuardRepository.hasUnfinishedReview(context, pkg)) repo.clearUnfinishedReview(pkg)
+            repo.forgetPackage(pkg)
         }
     }
 }
@@ -182,36 +185,34 @@ class VerifyResultReceiver : BroadcastReceiver() {
 
 /**
  * IchthysOS: the tester app's "Check everything" button asks Guard to run "Verify my protection"
- * (every stand-in, the probe as the tester). Exported without a permission (a testkey user app
- * can hold none), so the sender is checked instead: the probe sends with its identity shared
- * (BroadcastOptions.setShareIdentityEnabled) and only org.ichthys.probe is accepted; the probe
- * must also be the app on screen. Nothing is granted here: the run uses Guard's presets and
- * puts the probe's own setup back, as every verification does.
+ * (every stand-in, the probe as the tester). Exported without a permission (the tester is a user
+ * app and can hold none), so the sender is checked instead: the probe sends with its identity
+ * shared (BroadcastOptions.setShareIdentityEnabled), and only org.ichthys.probe signed with the
+ * IchthysOS probe key ([VerifyRunner.isGenuineProbe]) is accepted: the name alone is free to
+ * take. Nothing runs from here: Guard's Verify page opens and asks the owner first (a run hands
+ * the tester the Messenger and Maps presets for minutes).
  */
 class VerifyRequestReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != ACTION_VERIFY_REQUEST || !GuardRepository.isGuardUser()) return
-        if (sentFromPackage != VerifyRunner.PROBE_PACKAGE) {
+        if (sentFromPackage != VerifyRunner.PROBE_PACKAGE || !VerifyRunner.isGenuineProbe(context)) {
             android.util.Log.w("IchthysGuard", "verify request from ${sentFromPackage ?: "an unnamed sender"} ignored")
             return
         }
         if (context.getSystemService(UserManager::class.java)?.isUserUnlocked != true) return
-        val pending = goAsync()
-        Thread {
-                try {
-                    val error = VerifyRunner.get(context).start(null, fromProbe = true)
-                    if (error != null) {
-                        android.os.Handler(android.os.Looper.getMainLooper()).post {
-                            android.widget.Toast.makeText(context, error, android.widget.Toast.LENGTH_LONG).show()
-                        }
-                    }
-                } catch (e: Exception) {
-                    android.util.Log.w("IchthysGuard", "verify request failed", e)
-                } finally {
-                    pending.finish()
-                }
-            }
-            .start()
+        try {
+            VerifyRunner.get(context).requestFromProbe()
+            context.startActivity(
+                Intent(context, com.android.settings.ichthys.guard.ui.GuardActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                    .putExtra(
+                        com.android.settings.ichthys.guard.ui.GuardActivity.EXTRA_OPEN_PAGE,
+                        com.android.settings.ichthys.guard.ui.GuardActivity.OPEN_PAGE_VERIFY,
+                    )
+            )
+        } catch (e: RuntimeException) {
+            android.util.Log.w("IchthysGuard", "verify request not shown", e)
+        }
     }
 
     companion object {

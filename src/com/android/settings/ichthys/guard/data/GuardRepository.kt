@@ -157,6 +157,30 @@ class GuardRepository(
     private val _rules = MutableStateFlow(ruleStore.load())
     val rules: StateFlow<RuleBook> = _rules.asStateFlow()
 
+    /**
+     * IchthysOS: policies.json or rules.json exists but couldn't be read, so Guard runs on the
+     * defaults (everything allowed). The whole-table pushes (boot, installs, schedules) would
+     * then overwrite the service's good table with "allow all": they are skipped and the home
+     * page's red card says so until the owner imports a backup or accepts the defaults
+     * ([acceptDefaultsAfterUnreadable]). Single-app changes still go through.
+     */
+    private val _storesUnreadable =
+        MutableStateFlow(
+            policyStore.unreadable || ruleStore.unreadable ||
+                policyStore.hasUnreadableCopy() || ruleStore.hasUnreadableCopy()
+        )
+    val storesUnreadable: StateFlow<Boolean> = _storesUnreadable.asStateFlow()
+
+    /** IchthysOS: the owner accepts the defaults after unreadable stores; pushes resume. */
+    fun acceptDefaultsAfterUnreadable() {
+        policyStore.acknowledgeUnreadable()
+        ruleStore.acknowledgeUnreadable()
+        _storesUnreadable.value = false
+        journal(JournalKind.RULES_APPLIED, "Unreadable saved settings replaced by the defaults")
+        pushAllNetworkPolicies()
+        pushBehaviours()
+    }
+
     private val _events = MutableStateFlow<List<LabeledEvent>>(emptyList())
     /** Newest last. Bounded to [MAX_EVENTS]. */
     val events: StateFlow<List<LabeledEvent>> = _events.asStateFlow()
@@ -221,6 +245,14 @@ class GuardRepository(
 
     /** Guards every read-modify-write of [_policies] (main thread, workers, the observer). */
     private val policyLock = Any()
+    /**
+     * IchthysOS: every read-modify-write of the rule book holds this (the Lockdown tile's
+     * receiver, the UI, notification actions and IO jobs write it from different threads; an
+     * unlocked copy-and-save lost one side's change).
+     */
+    private val rulesLock = Any()
+    /** IchthysOS: the same for the automation settings. */
+    private val automationLock = Any()
 
     /**
      * The OS exception lists ([OsSettingKey]) are also edited elsewhere (the permission dialog's
@@ -302,7 +334,20 @@ class GuardRepository(
                     prefs.edit().putLong(KEY_PAUSED_UNTIL, it).apply()
                 }
             // Platform seq restarts at 1 after a reboot: don't let the old high-water mark hide it.
-            if (backend.getLatestSeq() < _stats.value.lastSeq) _stats.update { it.resetSeq() }
+            // IchthysOS: the boot count says whether a reboot happened. The seq test alone reset
+            // the stats whenever the service was briefly unreachable (latest = 0) and missed a
+            // reboot whose new seq had already passed the old mark; it stays the fallback for the
+            // first start with this rule.
+            if (backend.isLive) {
+                val boot =
+                    Settings.Global.getInt(context.contentResolver, Settings.Global.BOOT_COUNT, -1)
+                val seenBoot = prefs.getInt(KEY_STATS_BOOT, -1)
+                val rebooted =
+                    if (boot >= 0 && seenBoot >= 0) boot != seenBoot
+                    else backend.getLatestSeq() < _stats.value.lastSeq
+                if (rebooted) _stats.update { it.resetSeq() }
+                if (boot >= 0 && boot != seenBoot) prefs.edit().putInt(KEY_STATS_BOOT, boot).apply()
+            }
             // Behaviours, alerts and schedules live here; the service only holds the result.
             backend.setAlertMask(_automation.value.alertMask)
             pushBehaviours()
@@ -638,6 +683,10 @@ class GuardRepository(
 
     /** Pushes every app's behaviour flags (screen-off, foreground-only, LAN) to the service. */
     fun pushBehaviours() {
+        if (_storesUnreadable.value) {
+            Log.w(TAG, "saved settings unreadable: behaviour table not pushed")
+            return
+        }
         if (_apps.value.isEmpty()) refreshApps()
         val table = HashMap<Int, Int>()
         for (app in _apps.value) {
@@ -658,6 +707,11 @@ class GuardRepository(
 
     /** Pushes every app's effective access to the platform (boot, lockdown changes, import). */
     fun pushAllNetworkPolicies() {
+        // IchthysOS: G6: the defaults of an unreadable store must not replace the service's table.
+        if (_storesUnreadable.value) {
+            Log.w(TAG, "saved settings unreadable: network table not pushed")
+            return
+        }
         if (_apps.value.isEmpty()) refreshApps()
         val table = HashMap<Int, UidRule>()
         for (app in _apps.value) {
@@ -758,37 +812,48 @@ class GuardRepository(
         }
     }
 
-    fun addRule(rule: CustomRule) = saveRules(_rules.value.upsert(rule))
+    /** Read-modify-write of the rule book under [rulesLock]; returns the book written. */
+    private fun updateRules(change: (RuleBook) -> RuleBook): RuleBook =
+        synchronized(rulesLock) { change(_rules.value).also { saveRules(it) } }
 
-    fun removeRule(id: String) = saveRules(_rules.value.remove(id))
+    fun addRule(rule: CustomRule) {
+        updateRules { it.upsert(rule) }
+    }
 
-    fun setSourceEnabled(id: String, enabled: Boolean) =
-        saveRules(
-            _rules.value.copy(
-                sources =
-                    _rules.value.sources.map { if (it.id == id) it.copy(enabled = enabled) else it }
-            )
-        )
+    fun removeRule(id: String) {
+        updateRules { it.remove(id) }
+    }
+
+    fun setSourceEnabled(id: String, enabled: Boolean) {
+        updateRules { book ->
+            book.copy(sources = book.sources.map { if (it.id == id) it.copy(enabled = enabled) else it })
+        }
+    }
 
     fun setLockdown(enabled: Boolean) {
         if (_apps.value.isEmpty()) refreshApps() // e.g. toggled from the QS tile on a cold start
-        val lock = _rules.value.lockdown
-        // IchthysOS: seed the default allowlist once. An allowlist the user emptied on purpose
-        // stays empty.
-        val seeded = prefs.getBoolean(KEY_LOCKDOWN_SEEDED, false)
-        val allow =
-            if (lock.allowlist.isEmpty() && !seeded) defaultLockdownAllowlist() else lock.allowlist
-        if (!seeded) prefs.edit().putBoolean(KEY_LOCKDOWN_SEEDED, true).apply()
-        saveRules(
-            _rules.value.copy(
-                lockdown =
-                    lock.copy(
-                        enabled = enabled,
-                        allowlist = allow,
-                        sinceMs = if (enabled) System.currentTimeMillis() else 0,
-                    )
+        val lock: com.android.settings.ichthys.guard.model.LockdownState
+        val allow: Set<String>
+        synchronized(rulesLock) {
+            lock = _rules.value.lockdown
+            // IchthysOS: seed the default allowlist once. An allowlist the user emptied on purpose
+            // stays empty.
+            val seeded = prefs.getBoolean(KEY_LOCKDOWN_SEEDED, false)
+            allow =
+                if (lock.allowlist.isEmpty() && !seeded) defaultLockdownAllowlist().also { journalLockdownSeed(it) }
+                else lock.allowlist
+            if (!seeded) prefs.edit().putBoolean(KEY_LOCKDOWN_SEEDED, true).apply()
+            saveRules(
+                _rules.value.copy(
+                    lockdown =
+                        lock.copy(
+                            enabled = enabled,
+                            allowlist = allow,
+                            sinceMs = if (enabled) System.currentTimeMillis() else 0,
+                        )
+                )
             )
-        )
+        }
         if (lock.enabled != enabled) {
             journal(
                 if (enabled) JournalKind.LOCKDOWN_ON else JournalKind.LOCKDOWN_OFF,
@@ -810,33 +875,82 @@ class GuardRepository(
     }
 
     fun setLockdownAllowed(pkg: String, allowed: Boolean) {
-        val lock = _rules.value.lockdown
-        // The first edit starts from the defaults (dialer, messaging, the ROM's own apps):
-        // a preset that keeps one messenger online must not leave everything else dark at the
-        // first lockdown. From then on the user is choosing the list.
-        val seeded = prefs.getBoolean(KEY_LOCKDOWN_SEEDED, false)
-        val base = if (lock.allowlist.isEmpty() && !seeded) defaultLockdownAllowlist() else lock.allowlist
-        prefs.edit().putBoolean(KEY_LOCKDOWN_SEEDED, true).apply()
-        saveRules(
-            _rules.value.copy(
-                lockdown =
-                    lock.copy(
-                        allowlist = if (allowed) base + pkg else base - pkg
-                    )
-            )
-        )
-        if (lock.enabled) scope.launch { pushAllNetworkPolicies() }
+        val written =
+            updateRules { book ->
+                val lock = book.lockdown
+                // The first edit starts from the defaults (dialer, messaging, the ROM's own
+                // apps): a preset that keeps one messenger online must not leave everything else
+                // dark at the first lockdown. From then on the user is choosing the list.
+                val seeded = prefs.getBoolean(KEY_LOCKDOWN_SEEDED, false)
+                val base =
+                    if (lock.allowlist.isEmpty() && !seeded) defaultLockdownAllowlist().also { journalLockdownSeed(it) }
+                    else lock.allowlist
+                prefs.edit().putBoolean(KEY_LOCKDOWN_SEEDED, true).apply()
+                book.copy(lockdown = lock.copy(allowlist = if (allowed) base + pkg else base - pkg))
+            }
+        if (written.lockdown.enabled) scope.launch { pushAllNetworkPolicies() }
     }
 
-    /** Messaging and phone apps stay reachable in lockdown unless the user changes it. */
+    /**
+     * Messaging and phone apps stay reachable in lockdown unless the user changes it.
+     *
+     * IchthysOS: X6: decided by what an app really is, never by its name alone: the holders of
+     * the dialer and SMS roles, the always-on VPN, the wallet / tap-to-pay app, companion apps
+     * (a watch, earbuds, a car) and the genuine Ichthys Apps catalog apps (certificate pin), plus
+     * system apps whose name says phone, messaging or contacts or that are the ROM's own
+     * (org.ichthys.*): FLAG_SYSTEM can't be had by a sideloaded app. The old substring match
+     * over every app let any "…dialer…" or "org.ichthys…" package stay online in lockdown, and
+     * the background roles let any device admin, keyboard or notification listener in.
+     */
     private fun defaultLockdownAllowlist(): Set<String> =
         _apps.value
+            .filter { a -> a.isSystem && DEFAULT_LOCKDOWN_HINTS.any { a.packageName.contains(it) } }
             .map { it.packageName }
-            .filter { p -> DEFAULT_LOCKDOWN_HINTS.any { p.contains(it) } }
-            .toSet() +
-            // IchthysOS: the always-on VPN, companions and the wallet must stay reachable too,
-            // or lockdown drops the tunnel (and with Android's VPN lockdown, everything).
-            backgroundRoles()
+            .toSet() + lockdownRoles()
+
+    /** IchthysOS: the role holders [defaultLockdownAllowlist] keeps online. Never throws. */
+    private fun lockdownRoles(): Set<String> {
+        val out = HashSet<String>()
+        val cr = context.contentResolver
+        runCatching {
+            context.getSystemService(RoleManager::class.java)?.let { roles ->
+                out += roles.getRoleHolders(RoleManager.ROLE_DIALER)
+                out += roles.getRoleHolders(RoleManager.ROLE_SMS)
+                if (roles.isRoleAvailable(RoleManager.ROLE_WALLET))
+                    out += roles.getRoleHolders(RoleManager.ROLE_WALLET)
+            }
+        }
+        // The always-on VPN: lockdown must not drop the tunnel (and with Android's VPN
+        // lockdown, everything).
+        Settings.Secure.getString(cr, Settings.Secure.ALWAYS_ON_VPN_APP)
+            ?.takeIf { it.isNotBlank() }
+            ?.let { out += it }
+        Settings.Secure.getString(cr, Settings.Secure.NFC_PAYMENT_DEFAULT_COMPONENT)
+            ?.let(ComponentName::unflattenFromString)
+            ?.let { out += it.packageName }
+        runCatching {
+            context
+                .getSystemService(CompanionDeviceManager::class.java)
+                ?.allAssociations
+                ?.forEach { out += it.packageName }
+        }
+        runCatching { out += catalogPackages() }
+        return out
+    }
+
+    /**
+     * IchthysOS: journals what the first lockdown (or the first allowlist edit) took over from
+     * the defaults, so a role holder that stays online is on record. [base] is the seeded set.
+     */
+    private fun journalLockdownSeed(base: Set<String>) {
+        val names = base.sorted()
+        journal(
+            JournalKind.RULES_APPLIED,
+            "Lockdown allowlist started from the defaults (phone, SMS, VPN, wallet, companion " +
+                "and system apps): " +
+                names.take(12).joinToString() + if (names.size > 12) " and ${names.size - 12} more" else "",
+        )
+    }
 
     fun pause(minutes: Int) {
         backend.pauseEnforcement(minutes)
@@ -848,13 +962,17 @@ class GuardRepository(
     // ---- automation: profiles, screen-off rule, alerts, auto-tighten -------------------------
 
     fun updateAutomation(change: (AutomationSettings) -> AutomationSettings) {
-        val before = _automation.value
-        val next = change(before)
-        _automation.value = next
-        try {
-            automationStore.save(next)
-        } catch (e: java.io.IOException) {
-            Log.w(TAG, "automation not saved", e)
+        val before: AutomationSettings
+        val next: AutomationSettings
+        synchronized(automationLock) {
+            before = _automation.value
+            next = change(before)
+            _automation.value = next
+            try {
+                automationStore.save(next)
+            } catch (e: java.io.IOException) {
+                Log.w(TAG, "automation not saved", e)
+            }
         }
         if (before.alertMask != next.alertMask)
             scope.launch { backend.setAlertMask(next.alertMask) }
@@ -1068,11 +1186,33 @@ class GuardRepository(
     private fun catalogPackages(): Set<String> {
         val file = File(APPS_CATALOG)
         if (!file.exists()) return emptySet()
+        val pm = context.packageManager
         return try {
             val apps = JSONObject(file.readText()).optJSONArray("apps") ?: return emptySet()
+            // IchthysOS: X6: only the genuine copy counts, as for the platform's
+            // IchthysPreinstallController.isBundledPreinstall: the installed app must be signed
+            // with (or descend from) one of the entry's pinned certificates. The name alone is
+            // anyone's.
             (0 until apps.length())
-                .mapNotNull { i -> apps.optJSONObject(i)?.optString("package") }
-                .filter { it.isNotEmpty() }
+                .mapNotNull { i -> apps.optJSONObject(i) }
+                .filter { entry ->
+                    val pkg = entry.optString("package")
+                    val certs = entry.optJSONArray("certs")
+                    pkg.isNotEmpty() && certs != null &&
+                        (0 until certs.length()).any { j ->
+                            val hex = certs.optString(j, "").replace(":", "")
+                            hex.length == 64 &&
+                                runCatching {
+                                        pm.hasSigningCertificate(
+                                            pkg,
+                                            ByteArray(32) { b -> hex.substring(2 * b, 2 * b + 2).toInt(16).toByte() },
+                                            PackageManager.CERT_INPUT_SHA256,
+                                        )
+                                    }
+                                    .getOrDefault(false)
+                        }
+                }
+                .map { it.optString("package") }
                 .toSet()
         } catch (e: IOException) {
             throw IllegalStateException("$APPS_CATALOG unreadable", e)
@@ -1240,10 +1380,13 @@ class GuardRepository(
     /** @return number of rules imported. Throws IllegalArgumentException on bad input. */
     fun importJson(text: String): Int {
         val imported = RuleBook.fromJson(text)
-        val merged = _rules.value.copy(policies = _policies.value).merge(imported)
-        // The stores keep only what they own; the rest is applied to Settings below.
-        saveRules(merged.copy(automation = null, shieldLists = emptyMap(), masters = emptyMap(),
-            fakePlace = emptyMap()))
+        val merged: RuleBook
+        synchronized(rulesLock) {
+            merged = _rules.value.copy(policies = _policies.value).merge(imported)
+            // The stores keep only what they own; the rest is applied to Settings below.
+            saveRules(merged.copy(automation = null, shieldLists = emptyMap(), masters = emptyMap(),
+                fakePlace = emptyMap()))
+        }
         synchronized(policyLock) {
             // Imported policies overlay local ones: apply each exception that changed, one
             // package at a time. Nothing else in the shared keys changes.
@@ -1278,6 +1421,12 @@ class GuardRepository(
         }
         imported.automation?.let { auto -> updateAutomation { auto } }
         syncOsListsFromSettings()
+        // IchthysOS: a backup replaces unreadable saved settings; pushes resume.
+        if (_storesUnreadable.value) {
+            policyStore.acknowledgeUnreadable()
+            ruleStore.acknowledgeUnreadable()
+            _storesUnreadable.value = false
+        }
         scope.launch {
             pushAllNetworkPolicies()
             pushBehaviours()
@@ -1423,16 +1572,27 @@ class GuardRepository(
      * IchthysOS: [AppPreset.FULL_ACCESS] turns every allow list on instead ("nothing shielded")
      * and, with [grantPermissions] (the app page after its two confirmations, never a verify run
      * or a restore), also grants every permission the app asks for (FullAccessGranter). The
-     * permissions are Android's, not a list of Guard's: a later preset leaves them alone unless
-     * the caller also calls [revokeFullAccess]. Binder work; call off the main thread.
+     * permissions are Android's, not a list of Guard's. IchthysOS: any other preset, Custom
+     * included, takes back what Full access granted ([revokeFullAccess]) whenever a grant record
+     * exists: picking Custom used to only relabel the app and leave every grant in place for
+     * good. [keepFullAccessGrants] is for the verify runner only, whose stand-in presets must
+     * leave the tester's own Full access alone (its setup comes back after the run). Binder
+     * work; call off the main thread.
      */
-    fun applyPreset(pkg: String, preset: AppPreset, grantPermissions: Boolean = false) {
+    fun applyPreset(
+        pkg: String,
+        preset: AppPreset,
+        grantPermissions: Boolean = false,
+        keepFullAccessGrants: Boolean = false,
+    ) {
         val spec = preset.spec
         if (spec == null) {
             updatePolicy(pkg) { it.copy(preset = AppPreset.CUSTOM) }
             journal(JournalKind.PRESET, "Custom", pkg)
+            if (!keepFullAccessGrants) revokeFullAccessIfGranted(pkg)
             return
         }
+        if (!spec.fullAccess && !keepFullAccessGrants) revokeFullAccessIfGranted(pkg)
         val full = spec.fullAccess
         // The policy first (it mirrors contacts, clipboard and sensors into their lists itself):
         // when contactsAllowed flips off, OsSettingsBridge.setListed drops every "pkg:*" entry
@@ -1498,6 +1658,20 @@ class GuardRepository(
         val n = FullAccessGranter.revokeAll(context, pkg)
         if (n > 0) journal(JournalKind.PRESET, "Full access ended: ${quantityOf(n, "permission")} taken back", pkg)
     }
+
+    /** IchthysOS: [revokeFullAccess] when Full access ever granted [pkg] something. */
+    private fun revokeFullAccessIfGranted(pkg: String) {
+        if (FullAccessGranter.recorded(context, pkg) != null) revokeFullAccess(pkg)
+    }
+
+    /**
+     * IchthysOS: what Full access granted [pkg] and still holds while the app is on another
+     * preset (a Custom pick before the revoke-on-leave rule): the app page offers "Take back
+     * Full access" for it. 0 when nothing is recorded or the app is on Full access.
+     */
+    fun leftoverFullAccessGrants(pkg: String): Int =
+        if (_policies.value.policyFor(pkg).preset == AppPreset.FULL_ACCESS) 0
+        else FullAccessGranter.recorded(context, pkg)?.count ?: 0
 
     /**
      * IchthysOS: back to the Shielded defaults every app starts with: the default policy, no
@@ -1578,6 +1752,40 @@ class GuardRepository(
     }
 
     /**
+     * IchthysOS: [pkg] was uninstalled with its data (PACKAGE_FULLY_REMOVED): everything Guard
+     * keyed by its name goes, so the next app of that name (whoever signed it) starts Shielded
+     * instead of inheriting it: its policy, the Full access record, its place on the lockdown
+     * allowlist and the screen-off exemption. The OS allow lists are pruned by the platform
+     * (IchthysGuardService), also when Settings isn't running. Any thread.
+     */
+    fun forgetPackage(pkg: String) {
+        var removed = false
+        synchronized(policyLock) {
+            val set = _policies.value
+            if (pkg in set.policies) {
+                val next = PolicySet(set.policies - pkg)
+                _policies.value = next
+                savePolicies(next)
+                removed = true
+            }
+        }
+        if (FullAccessGranter.recorded(context, pkg) != null) {
+            FullAccessGranter.forget(context, pkg)
+            removed = true
+        }
+        _riskFacts.update { it - pkg }
+        if (pkg in _rules.value.lockdown.allowlist) {
+            updateRules { book -> book.copy(lockdown = book.lockdown.copy(allowlist = book.lockdown.allowlist - pkg)) }
+            removed = true
+        }
+        if (pkg in _automation.value.screenOffExempt) {
+            updateAutomation { it.copy(screenOffExempt = it.screenOffExempt - pkg) }
+            removed = true
+        }
+        if (removed) journal(JournalKind.PRESET, "Uninstalled: Guard's settings for it removed", pkg)
+    }
+
+    /**
      * IchthysOS: forgets marks whose app is gone, was reinstalled, or is no longer quarantined
      * (released while Settings wasn't running, or by the service). Off the main thread.
      */
@@ -1650,7 +1858,24 @@ class GuardRepository(
                     }
                 book = book.copy(sources = book.sources.map { if (it.id == s.id) updated else it })
             }
-            saveRules(book)
+            // IchthysOS: the downloads took a while. Only each downloaded source's update state
+            // goes into the rule book as it is now, so a lockdown or rule change made meanwhile
+            // isn't overwritten by the snapshot taken before the downloads.
+            val downloaded = book.sources.filter { it.enabled }.associateBy { it.id }
+            updateRules { now ->
+                now.copy(
+                    sources =
+                        now.sources.map { s ->
+                            downloaded[s.id]?.let { d ->
+                                s.copy(
+                                    lastUpdatedMs = d.lastUpdatedMs,
+                                    entryCount = d.entryCount,
+                                    lastError = d.lastError,
+                                )
+                            } ?: s
+                        }
+                )
+            }
             errors
         }
 
@@ -1669,6 +1894,8 @@ class GuardRepository(
         private const val KEY_PAUSED_UNTIL = "paused_until"
         private const val KEY_SENSORS_MIGRATED = "sensor_exemptions_migrated"
         private const val KEY_LOCKDOWN_SEEDED = "lockdown_allowlist_seeded"
+        /** IchthysOS: Settings.Global.BOOT_COUNT when the stats' seq mark was last valid. */
+        private const val KEY_STATS_BOOT = "stats_boot_count"
         /**
          * IchthysOS: first-launch reviews closed without a choice, as "package/firstInstallTime"
          * (see [markReviewUnfinished]).

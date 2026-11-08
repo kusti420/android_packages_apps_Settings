@@ -30,6 +30,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -38,11 +39,15 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.android.settings.ichthys.guard.model.AppPolicy
+import com.android.settings.ichthys.guard.os.PickedContacts
+import com.android.settings.ichthys.guard.os.RealDataGrants
 import com.android.settings.ichthys.guard.os.Shield
 import com.android.settings.ichthys.guard.os.ShieldGroup
 import com.android.settings.ichthys.guard.os.ShieldTable
 import com.android.settings.ichthys.guard.ui.theme.Guard
 import com.android.settings.ichthys.protect.IchthysProtect
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * IchthysOS: one sheet of the app page's DATA card: the per-app shields of one [ShieldGroup]
@@ -72,6 +77,14 @@ fun DataSheetScreen(vm: GuardViewModel, nav: GuardNav, packageName: String, grou
     val spec = policy.preset.spec
     val rows = remember(group) { ShieldTable.group(group) }
     fun update(change: (AppPolicy) -> AppPolicy) = repo.updatePolicy(packageName, change)
+    // IchthysOS: roles and special access that hand the app real data past its shields
+    // (notification access, call screening, companion devices, assistant, autofill).
+    val grants by
+        produceState(emptyList<RealDataGrants.Grant>(), packageName, group, tick) {
+            value =
+                if (group != ShieldGroup.PERSONAL) emptyList()
+                else withContext(Dispatchers.IO) { RealDataGrants.forPackage(context, packageName) }
+        }
 
     LazyColumn(modifier, contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item { PageHeader(group.label, nav.back, app?.label ?: packageName) }
@@ -94,12 +107,20 @@ fun DataSheetScreen(vm: GuardViewModel, nav: GuardNav, packageName: String, grou
                         "Only the contacts picked for it",
                         picked && !real,
                         if (real) "Has real contacts (below); picking doesn't apply"
-                        else if (picked) "Sees only the contacts you pick for it in the permission dialog"
+                        else if (picked) "Sees only the contacts you pick for it"
                         else "Off: sees an empty address book unless given real contacts below",
                         enabled = !real,
                     ) { on ->
                         ShieldTable.setContactsPicked(context, packageName, on)
                         version++
+                        // IchthysOS: switching it on goes straight to choosing the contacts.
+                        if (on) context.startActivity(PickedContacts.pickerIntent(context, packageName))
+                    }
+                    if (picked && !real) {
+                        val count = remember(version, tick) { PickedContacts.get(context, packageName).size }
+                        TextButton(onClick = { context.startActivity(PickedContacts.pickerIntent(context, packageName)) }) {
+                            Text(if (count == 0) "Choose contacts (none picked yet)" else "Choose contacts ($count picked)", color = t.accent)
+                        }
                     }
                     PresetDot(spec != null && picked != spec.contactsPicked)
                 }
@@ -163,6 +184,35 @@ fun DataSheetScreen(vm: GuardViewModel, nav: GuardNav, packageName: String, grou
                 if (group == ShieldGroup.PERSONAL) {
                     TextButton(onClick = { context.startActivity(IchthysProtect.noLocationIntent(context, packageName)) }) {
                         Text("All apps' location shields")
+                    }
+                }
+            }
+        }
+        if (grants.isNotEmpty()) {
+            item {
+                GuardCard(title = stringResource(com.android.settings.R.string.ichthys_guard_grants_title)) {
+                    Text(
+                        stringResource(com.android.settings.R.string.ichthys_guard_grants_intro),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = t.muted,
+                    )
+                    for (g in grants) {
+                        Text(
+                            stringResource(g.label),
+                            style = MaterialTheme.typography.titleMedium,
+                            color = t.danger,
+                            modifier = Modifier.padding(top = 8.dp),
+                        )
+                        Text(stringResource(g.detail), style = MaterialTheme.typography.bodySmall, color = t.muted)
+                        TextButton(
+                            onClick = {
+                                runCatching {
+                                    context.startActivity(g.manage.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+                                }
+                            }
+                        ) {
+                            Text(stringResource(com.android.settings.R.string.ichthys_guard_grants_manage), color = t.accent)
+                        }
                     }
                 }
             }

@@ -28,6 +28,13 @@ data class AppFacts(
     val requestedPermissions: Set<String>,
     /** Has a BROWSABLE http(s) VIEW filter with no fixed host, i.e. it is a web browser. */
     val isBrowser: Boolean,
+    /**
+     * IchthysOS: T1: the scan couldn't read all of the code. [trackers] is then null when it
+     * found none (unknown, never "none") or the trackers found so far.
+     */
+    val scanIncomplete: Boolean = false,
+    /** IchthysOS: T1: dex/jar files in its assets or a run-time dex loader (code never scanned). */
+    val loadsCodeAtRuntime: Boolean = false,
 ) {
     val usesInternet: Boolean
         get() = PERMISSION_INTERNET in requestedPermissions

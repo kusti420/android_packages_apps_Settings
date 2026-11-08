@@ -69,6 +69,12 @@
     <string name="ichthys_guard_first_launch_section_recommended">Recommended</string>
     <string name="ichthys_guard_first_launch_no_trackers">No known trackers</string>
     <string name="ichthys_guard_first_launch_scan_pending">Tracker scan not finished yet</string>
+    <!-- IchthysOS: T1: the install scan couldn't read all of the app's code. -->
+    <string name="ichthys_guard_first_launch_scan_incomplete">Trackers unknown: the scan couldn\'t read all of this app\'s code</string>
+    <string name="ichthys_guard_first_launch_scan_incomplete_more">The scan couldn\'t read all of the code, so there may be more.</string>
+    <!-- IchthysOS: T1: dex/jar in assets or a dex class loader. -->
+    <string name="ichthys_guard_first_launch_runtime_code">Loads code at runtime</string>
+    <string name="ichthys_guard_first_launch_runtime_code_text">It ships code as data or uses a dex class loader: code it downloads or unpacks later is never scanned.</string>
     <plurals name="ichthys_guard_first_launch_trackers_found">
         <item quantity="one"><xliff:g id="count">%d</xliff:g> tracker found</item>
         <item quantity="other"><xliff:g id="count">%d</xliff:g> trackers found</item>
@@ -134,4 +140,27 @@
     <string name="ichthys_protected_summary_off">Off: <xliff:g id="protections">%1$s</xliff:g></string>
     <!-- IchthysOS: the No location page (LocationNoFixSettings) when no app requests location. -->
     <string name="ichthys_location_nofix_empty">No app you installed asks for your location.</string>
+
+    <!-- IchthysOS: Guard app page, "Real data through other doors": roles and special access
+         that hand an app real data whatever its shields say (RealDataGrants). -->
+    <string name="ichthys_guard_grants_title">Real data through other doors</string>
+    <string name="ichthys_guard_grants_intro">Granted outside Guard. These reach the app\'s real data whatever its shields above say; take them back where they were given.</string>
+    <string name="ichthys_guard_grants_manage">Manage</string>
+    <string name="ichthys_guard_grant_notifications">Notification access</string>
+    <string name="ichthys_guard_grant_notifications_detail">Reads every notification as it arrives, message previews and one-time codes included. Quiet notifications don\'t hide them from it.</string>
+    <string name="ichthys_guard_grant_call_screening">Call screening</string>
+    <string name="ichthys_guard_grant_call_screening_detail">Sees the number of every incoming call, whatever the call log shield says.</string>
+    <string name="ichthys_guard_grant_companion_watch">Watch companion</string>
+    <string name="ichthys_guard_grant_companion_glasses">Glasses companion</string>
+    <string name="ichthys_guard_grant_companion_streaming">App streaming companion</string>
+    <string name="ichthys_guard_grant_companion_computer">Computer companion</string>
+    <string name="ichthys_guard_grant_companion_virtual">Virtual device companion</string>
+    <string name="ichthys_guard_grant_companion_medical">Medical device companion</string>
+    <string name="ichthys_guard_grant_companion_detail">A companion device role: it can follow ongoing calls (number and caller name), read notifications and run unrestricted in the background, whatever its shields say.</string>
+    <string name="ichthys_guard_grant_companion_device">Paired companion device</string>
+    <string name="ichthys_guard_grant_companion_device_detail">Associated with a device you paired: it stays bound and unrestricted in the background.</string>
+    <string name="ichthys_guard_grant_assistant">Default assistant</string>
+    <string name="ichthys_guard_grant_assistant_detail">When you call it up it gets what is on the screen and can listen through the microphone.</string>
+    <string name="ichthys_guard_grant_autofill">Autofill service</string>
+    <string name="ichthys_guard_grant_autofill_detail">Sees what you type into forms in other apps, passwords included.</string>
 </resources>

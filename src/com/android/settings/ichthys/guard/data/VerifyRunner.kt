@@ -67,6 +67,12 @@ data class ProbeStatus(
     val inSystem: Boolean,
     val version: String,
     val quarantined: Boolean,
+    /**
+     * IchthysOS: signed with the IchthysOS probe key ([VerifyRunner.PROBE_CERT_SHA256]). The
+     * package name alone is free to take; an installed app of that name without the pin is
+     * not the tester and gets nothing from Guard.
+     */
+    val genuine: Boolean = false,
 )
 
 /**
@@ -121,7 +127,33 @@ class VerifyRunner private constructor(private val context: Context) {
         val version =
             runCatching { pm.getPackageInfo(PROBE_PACKAGE, 0).versionName ?: "" }.getOrDefault("")
         val quarantined = runCatching { pm.isPackageQuarantined(PROBE_PACKAGE) }.getOrDefault(false)
-        return ProbeStatus(true, inSystem, version, quarantined)
+        return ProbeStatus(true, inSystem, version, quarantined, isGenuineProbe(context))
+    }
+
+    private val _probeRequest = MutableStateFlow<Long?>(null)
+    /**
+     * IchthysOS: elapsedRealtime of the tester's "Check everything" request waiting for the
+     * owner's confirmation on the Verify page, or null. Only [VerifyRequestReceiver] sets it,
+     * after checking the sender's certificate; nothing runs until the owner confirms.
+     */
+    val probeRequest: StateFlow<Long?> = _probeRequest.asStateFlow()
+
+    /** IchthysOS: records the tester's request; the Verify page asks the owner. */
+    fun requestFromProbe() {
+        _probeRequest.value = SystemClock.elapsedRealtime()
+    }
+
+    /**
+     * IchthysOS: the owner answered the tester's request on screen. Returns the error of [start]
+     * when confirmed, null otherwise. A request older than [PROBE_REQUEST_TTL_MS] is dropped.
+     */
+    fun answerProbeRequest(confirmed: Boolean): String? {
+        val at = _probeRequest.value
+        _probeRequest.value = null
+        if (!confirmed || at == null) return null
+        if (SystemClock.elapsedRealtime() - at > PROBE_REQUEST_TTL_MS)
+            return "The tester's request expired. Press its button again."
+        return start(null, fromProbe = true)
     }
 
     /**
@@ -134,6 +166,11 @@ class VerifyRunner private constructor(private val context: Context) {
         if (!status.installed)
             return "IchthysProbe isn't installed. Build it with `m IchthysProbe` and install it " +
                 "as a user app (adb install), never into /system."
+        // IchthysOS: a run hands the tester presets (Messenger: online through lockdown; Maps:
+        // real location, scans, sensors). Only the probe signed with the IchthysOS probe key.
+        if (!status.genuine)
+            return "The installed IchthysProbe isn't signed with the IchthysOS probe key, so Guard " +
+                "doesn't trust it. Re-sign it (IchthysProbe/tools/sign_probe.sh) and install it again."
         if (status.quarantined)
             return "IchthysProbe is still quarantined. Open it once and release it, then verify."
         if (!repo.backend.isLive) return "The Guard service isn't reachable; nothing to verify."
@@ -187,7 +224,7 @@ class VerifyRunner private constructor(private val context: Context) {
         prefs.edit().putString(KEY_TOKEN, token).putString(KEY_RUN, run.id).putInt(KEY_PHASE, index).apply()
         // The stand-in: the preset's table, or the verified app's own setup for Custom.
         if (phase.standIn.spec != null) {
-            repo.applyPreset(PROBE_PACKAGE, phase.standIn)
+            repo.applyPreset(PROBE_PACKAGE, phase.standIn, keepFullAccessGrants = true)
         } else if (run.forPackage != null) {
             copySetup(run.forPackage, PROBE_PACKAGE)
         }
@@ -217,7 +254,9 @@ class VerifyRunner private constructor(private val context: Context) {
                 .putExtra(EXTRA_REPLY_COMPONENT, "${context.packageName}/$RECEIVER_CLASS")
                 .putExtra(EXTRA_STAND_IN, phase.standIn.label)
         putExpectations(intent, PROBE_PACKAGE)
-        putTruths(intent)
+        // IchthysOS: no truth_* counts and no fake place go to the tester any more: what it
+        // reports is compared with them here (categorise), so the launch carries nothing about
+        // the owner's data or place.
         try {
             // Share Guard's identity with the probe: its launch check (GuardRun.trustedLaunch)
             // accepts a Guard run only from the system uid, which it can only see this way.
@@ -260,11 +299,8 @@ class VerifyRunner private constructor(private val context: Context) {
                 LocationMode.FAKE -> if (fakeOn) "fake" else "real"
             },
         )
-        if (fakeOn) {
-            Settings.Secure.getString(context.contentResolver, ShieldTable.KEY_SPOOF_FAKE)?.let {
-                intent.putExtra(EXTRA_EXPECT_FAKE_LATLON, it)
-            }
-        }
+        // IchthysOS: the fake place itself stays here; the probe reports its fix and Guard
+        // measures the distance (judgeFakePlace).
         // IchthysOS: a spoofed app (on the fake place) gets empty Wi-Fi, cell and Bluetooth
         // scans from the platform (IchthysLocationSpoof) whatever its scan control says.
         intent.putExtra(
@@ -319,9 +355,11 @@ class VerifyRunner private constructor(private val context: Context) {
     /**
      * Row counts as Settings sees them, so 0 rows is proof. These queries return the real rows
      * only because Settings runs as uid 1000 (the system), which the providers' shields exempt;
-     * the same URIs are what the probe queries (its truth names, PersonalProbes).
+     * the same URIs are what the probe queries (its truth names, PersonalProbes). IchthysOS:
+     * kept here: the probe reports what it saw and [rejudgeWithTruth] compares (they used to go
+     * to the probe as truth_* extras, which any app of the probe's name would have received).
      */
-    private fun putTruths(intent: Intent) {
+    private fun truthCounts(): Map<String, Int> {
         fun count(uri: Uri, projection: Array<String>? = arrayOf("_id")): Int =
             try {
                 context.contentResolver.query(uri, projection, null, null, null)?.use {
@@ -330,39 +368,98 @@ class VerifyRunner private constructor(private val context: Context) {
             } catch (e: RuntimeException) {
                 -1
             }
-        intent.putExtra("truth_contacts", count(ContactsContract.Contacts.CONTENT_URI))
-        intent.putExtra("truth_raw_contacts", count(ContactsContract.RawContacts.CONTENT_URI))
-        intent.putExtra("truth_phones", count(ContactsContract.CommonDataKinds.Phone.CONTENT_URI))
-        intent.putExtra("truth_groups", count(ContactsContract.Groups.CONTENT_URI))
-        intent.putExtra("truth_profile", count(ContactsContract.Profile.CONTENT_URI))
+        val out = LinkedHashMap<String, Int>()
+        out["contacts"] = count(ContactsContract.Contacts.CONTENT_URI)
+        out["raw_contacts"] = count(ContactsContract.RawContacts.CONTENT_URI)
+        out["phones"] = count(ContactsContract.CommonDataKinds.Phone.CONTENT_URI)
+        out["groups"] = count(ContactsContract.Groups.CONTENT_URI)
+        out["profile"] = count(ContactsContract.Profile.CONTENT_URI)
         // The probe asks ContactsContract.Settings.getDefaultAccount(), not for rows: 1 when a
         // default account for new contacts is set, 0 when none, -1 when the call fails.
-        intent.putExtra(
-            "truth_default_account",
+        out["default_account"] =
             try {
                 if (ContactsContract.Settings.getDefaultAccount(context.contentResolver) != null) 1
                 else 0
             } catch (e: RuntimeException) {
                 -1
-            },
-        )
+            }
         // The SIM providers build their own cursors; a projection is ignored (null, as the probe).
-        intent.putExtra("truth_sim_phonebook", count(Uri.parse("content://icc/adn"), null))
-        intent.putExtra("truth_calendars", count(CalendarContract.Calendars.CONTENT_URI))
-        intent.putExtra("truth_events", count(CalendarContract.Events.CONTENT_URI))
+        out["sim_phonebook"] = count(Uri.parse("content://icc/adn"), null)
+        out["calendars"] = count(CalendarContract.Calendars.CONTENT_URI)
+        out["events"] = count(CalendarContract.Events.CONTENT_URI)
         val now = System.currentTimeMillis()
         val instances = CalendarContract.Instances.CONTENT_URI.buildUpon()
         ContentUris.appendId(instances, now)
         ContentUris.appendId(instances, now + 30L * 86_400_000L)
-        intent.putExtra("truth_instances_30d", count(instances.build()))
-        intent.putExtra("truth_calllog", count(CallLog.Calls.CONTENT_URI))
-        intent.putExtra("truth_sms", count(Telephony.Sms.CONTENT_URI))
-        intent.putExtra("truth_mms", count(Telephony.Mms.CONTENT_URI))
-        intent.putExtra(
-            "truth_conversations",
-            count(Uri.parse("content://mms-sms/conversations?simple=true")),
-        )
-        intent.putExtra("truth_sms_icc", count(Uri.parse("content://sms/icc"), null))
+        out["instances_30d"] = count(instances.build())
+        out["calllog"] = count(CallLog.Calls.CONTENT_URI)
+        out["sms"] = count(Telephony.Sms.CONTENT_URI)
+        out["mms"] = count(Telephony.Mms.CONTENT_URI)
+        out["conversations"] = count(Uri.parse("content://mms-sms/conversations?simple=true"))
+        out["sms_icc"] = count(Uri.parse("content://sms/icc"), null)
+        return out
+    }
+
+    /**
+     * IchthysOS: the read-shield checks the probe could not judge without the ground truth
+     * ("n/a: ... no ground truth to compare": the shield doesn't protect it, so it must see the
+     * real rows). The probe reports the truth name and the rows it saw; Guard compares them with
+     * its own count. Returns the new (verdict, why), or null to keep the probe's.
+     */
+    private fun rejudgeWithTruth(
+        p: JSONObject,
+        verdict: String,
+        why: String,
+        truths: Map<String, Int>,
+    ): Pair<String, String>? {
+        val name = p.optString("truth", "")
+        if (name.isEmpty() || verdict != "info" || !why.contains(NO_TRUTH_MARK)) return null
+        val truth = truths[name] ?: return null
+        val seen = p.optInt("seen", -1)
+        if (truth <= 0 || seen < 0) return null
+        return if (seen > 0) "pass" to "as promised: an allowed app reads the real data (Guard's count: $truth)"
+        else "fail" to "allowed app sees no rows although the provider has $truth (Guard's count)"
+    }
+
+    /**
+     * IchthysOS: the fake place check, judged here: the probe reports the fix it got
+     * ("lat,lon,accuracy" in "fix") and Guard measures it against the fake place it set, which
+     * never leaves Settings. Returns the new (verdict, why), or null to keep the probe's.
+     */
+    private fun judgeFakePlace(p: JSONObject, verdict: String): Pair<String, String>? {
+        // The probe's own verdict says whether the check applies (precise permission, a fix,
+        // location allowed); only a "pass" there means "a fix came, judge its place".
+        if (verdict != "pass") return null
+        val fix = p.optString("fix", "").split(",").mapNotNull { it.trim().toDoubleOrNull() }
+        if (fix.size < 3) return null
+        val mode = repo.locationMode(PROBE_PACKAGE)
+        val fakeOn = repo.fakePlaceOn()
+        val fake =
+            Settings.Secure.getString(context.contentResolver, ShieldTable.KEY_SPOOF_FAKE)
+                ?.split(",")
+                ?.mapNotNull { it.trim().toDoubleOrNull() }
+        if (!fakeOn || fake == null || fake.size < 2)
+            return "info" to "n/a: the fake place is off, so a real fix is all there is"
+        val d = FloatArray(1)
+        android.location.Location.distanceBetween(fix[0], fix[1], fake[0], fake[1], d)
+        val bucket =
+            when {
+                d[0] < 1000 -> "<1 km"
+                d[0] < 5000 -> "1–5 km"
+                d[0] < 50_000 -> "5–50 km"
+                else -> ">50 km"
+            }
+        return when (mode) {
+            LocationMode.FAKE ->
+                if (d[0] <= FAKE_RADIUS_M) "pass" to "as promised: the fix is the fake place ($bucket)"
+                else "fail" to "Guard set the fake place but the fix is $bucket from it"
+            // "At the fake place" for an app set to Real: within the fake offset band
+            // (150-650 m) plus the fix's own accuracy.
+            LocationMode.REAL ->
+                if (d[0] <= fix[2] + 700) "fail" to "Guard set Real but the fix is at the fake place"
+                else "pass" to "as promised: a real fix, $bucket from the fake place"
+            LocationMode.NONE -> null
+        }
     }
 
     /** The probe's answer (any thread). Ignored unless [token] is the one of the open phase. */
@@ -486,11 +583,25 @@ class VerifyRunner private constructor(private val context: Context) {
             }
         // IchthysOS: the spoof.* probes report raw values; Guard judges them against the profile.
         val spoof by lazy { spoofExpectation(PROBE_PACKAGE) }
+        // IchthysOS: Guard's own ground truth, counted once per phase and only when needed.
+        val truths by lazy { truthCounts() }
         for (i in 0 until probes.length()) {
             val p = probes.optJSONObject(i) ?: continue
             val id = p.optString("id")
             var verdict = p.optString("verdict", "info")
             var why = p.optString("why", "")
+            if (p.has("truth")) {
+                rejudgeWithTruth(p, verdict, why, truths)?.let {
+                    verdict = it.first
+                    why = it.second
+                }
+            }
+            if (id == "location.fake_place") {
+                judgeFakePlace(p, verdict)?.let {
+                    verdict = it.first
+                    why = it.second
+                }
+            }
             if (SpoofChecks.isSpoofProbe(id)) {
                 val detail = p.optJSONObject("detail")
                 val values = LinkedHashMap<String, String>()
@@ -718,6 +829,40 @@ class VerifyRunner private constructor(private val context: Context) {
         private const val ERROR_INTERRUPTED = "Interrupted (Settings restarted)"
         private const val ERROR_INCONCLUSIVE =
             "Phone was locked or asleep during the run; results not conclusive"
+        /** The probe's n/a reason for a read check it can't judge without the ground truth. */
+        private const val NO_TRUTH_MARK = "no ground truth to compare"
+        /** The fake place's offset is 150-650 m plus noise; anything inside this is "the fake place". */
+        private const val FAKE_RADIUS_M = 2_000f
+        /** How long the tester's "Check everything" request waits for the owner's confirmation. */
+        private const val PROBE_REQUEST_TTL_MS = 2 * 60_000L
+
+        /**
+         * IchthysOS: SHA-256 of the certificate the tester must be signed with: the dedicated
+         * IchthysOS probe key (~/.android-certs/ichthys_probe; public cert in
+         * packages/apps/IchthysProbe/certs/ichthys_probe.x509.pem). The AOSP testkey, whose
+         * private key is public, is never accepted.
+         */
+        private const val PROBE_CERT_SHA256 =
+            "4c66e68421334121aa243a4a94f67b9adb65289a2ee4e1048a21694fab5cb829"
+
+        /**
+         * IchthysOS: whether the installed [PROBE_PACKAGE] is the real tester (signed with
+         * [PROBE_CERT_SHA256]). Every place that trusts the tester asks this, never the name.
+         */
+        @JvmStatic
+        fun isGenuineProbe(context: Context): Boolean =
+            try {
+                context.packageManager.hasSigningCertificate(
+                    PROBE_PACKAGE,
+                    hexToBytes(PROBE_CERT_SHA256),
+                    PackageManager.CERT_INPUT_SHA256,
+                )
+            } catch (e: RuntimeException) {
+                false
+            }
+
+        private fun hexToBytes(hex: String): ByteArray =
+            ByteArray(hex.length / 2) { i -> hex.substring(2 * i, 2 * i + 2).toInt(16).toByte() }
 
         /** Explicit broadcast from the probe with one phase's verdicts. */
         const val ACTION_RESULT = "org.ichthys.probe.action.RESULT"
