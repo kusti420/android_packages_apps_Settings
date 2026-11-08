@@ -16,6 +16,8 @@
 
 package com.android.settings.ichthys.guard.ui
 
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -182,7 +184,7 @@ fun VerifyScreen(vm: GuardViewModel, nav: GuardNav, forPackage: String?, modifie
                 colors = ButtonDefaults.buttonColors(containerColor = t.accent, contentColor = t.onAccent),
             ) {
                 if (busy) {
-                    CircularProgressIndicator(Modifier.padding(end = 10.dp).height(20.dp), strokeWidth = 2.dp, color = t.onAccent)
+                    CircularProgressIndicator(Modifier.padding(end = 10.dp).size(20.dp), strokeWidth = 2.dp, color = LocalContentColor.current)
                     Text(running?.verdictLine ?: "Running…")
                 } else Text(if (shown == null) "Run verification" else "Run again")
             }
